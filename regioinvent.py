@@ -45,8 +45,12 @@ class Regioinvent:
 
         with open(pkg_resources.resource_filename(__name__, '/Data/HS_to_ecoinvent_name.json'), 'r') as f:
             self.hs_class_to_eco = json.load(f)
+        with open(pkg_resources.resource_filename(__name__, '/Data/HS_to_exiobase_name.json'), 'r') as f:
+            self.hs_class_to_exio = json.load(f)
         with open(pkg_resources.resource_filename(__name__, '/Data/country_to_ecoinvent_regions.json'), 'r') as f:
             self.country_to_ecoinvent_regions = json.load(f)
+        with open(pkg_resources.resource_filename(__name__, '/Data/country_to_ecoinvent_regions.json'), 'r') as f:
+            self.country_to_exiobase_regions = json.load(f)
         with open(pkg_resources.resource_filename(__name__, '/Data/heat_industrial_ng_processes.json'), 'r') as f:
             self.heat_district_ng = json.load(f)
         with open(pkg_resources.resource_filename(__name__, '/Data/heat_industrial_non_ng_processes.json'), 'r') as f:
@@ -54,7 +58,9 @@ class Regioinvent:
         with open(pkg_resources.resource_filename(__name__, '/Data/heat_small_scale_non_ng_processes.json'), 'r') as f:
             self.heat_small_scale_non_ng = json.load(f)
         with open(pkg_resources.resource_filename(__name__, '/Data/COMTRADE_to_ecoinvent_geographies.json'), 'r') as f:
-            self.convert_geos = json.load(f)
+            self.convert_ecoinvent_geos = json.load(f)
+        with open(pkg_resources.resource_filename(__name__, '/Data/COMTRADE_to_exiobase_geographies.json'), 'r') as f:
+            self.convert_exiobase_geos = json.load(f)
 
         self.water_flows_in_ecoinvent = ['Water', 'Water, cooling, unspecified natural origin',
                                          'Water, lake',
@@ -326,8 +332,9 @@ class Regioinvent:
         self.logger.info("Performing first order regionalization...")
 
         export_data = pd.read_sql('SELECT * FROM "Export data"', con=self.conn)
-        # go from ISO3 codes to ISO2 codes
-        export_data.reporterISO = [self.convert_geos[i] for i in export_data.reporterISO]
+        domestic_prod = pd.read_sql('SELECT * FROM "Domestic production"', con=self.conn)
+        # only keep total export values (no need for destination detail)
+        export_data = export_data[export_data.partnerISO == 'W00']
         # check if AtlQty is defined whenever Qty is empty. If it is, then use that value.
         export_data.loc[export_data.qty == 0, 'qty'] = export_data.loc[export_data.qty == 0, 'altQty']
         # don't need AtlQty afterwards and drop zero values
@@ -335,6 +342,23 @@ class Regioinvent:
         export_data = export_data.loc[export_data.qty != 0]
         # check units match for all data
         assert len(set(export_data.loc[export_data.qty != 0, 'qtyUnitAbbr']) - {'N/A'}) == 1
+
+        self.domestic_data = export_data.copy('deep')
+        self.domestic_data.loc[:, 'COMTRADE_reporter'] = self.domestic_data.reporterISO.copy('deep')
+        # go from ISO3 codes to country codes for respective databases
+        export_data.reporterISO = [self.convert_ecoinvent_geos[i] for i in export_data.reporterISO]
+        self.domestic_data.reporterISO = [self.convert_ecoinvent_geos[i] for i in self.domestic_data.reporterISO]
+        self.domestic_data.COMTRADE_reporter = [self.convert_exiobase_geos[i] for i in
+                                                self.domestic_data.COMTRADE_reporter]
+
+        self.domestic_data = self.domestic_data.merge(
+            pd.DataFrame.from_dict(self.hs_class_to_exio, orient='index', columns=['cmdExio']).reset_index().rename(
+                columns={'index': 'cmdCode'}))
+        self.domestic_data = self.domestic_data.merge(domestic_prod, left_on=['COMTRADE_reporter', 'cmdExio'],
+                                                      right_on=['country', 'commodity'], how='left')
+        self.domestic_data.qty = (self.domestic_data.qty / (1 - self.domestic_data.loc[:, 'domestic use (%)'] / 100) *
+                                  self.domestic_data.loc[:, 'domestic use (%)'] / 100)
+        self.domestic_data.partnerISO = self.domestic_data.reporterISO
 
         for product in self.hs_class_to_eco:
             cmd_export_data = export_data[export_data.cmdCode == product].copy('deep')
@@ -596,8 +620,8 @@ class Regioinvent:
         # remove trade with "World"
         import_data = import_data.drop(import_data[import_data.partnerISO == 'W00'].index)
         # go from ISO3 codes to ISO2 codes
-        import_data.reporterISO = [self.convert_geos[i] for i in import_data.reporterISO]
-        import_data.partnerISO = [self.convert_geos[i] for i in import_data.partnerISO]
+        import_data.reporterISO = [self.convert_ecoinvent_geos[i] for i in import_data.reporterISO]
+        import_data.partnerISO = [self.convert_ecoinvent_geos[i] for i in import_data.partnerISO]
         # check if AtlQty is defined whenever Qty is empty. If it is, then use that value.
         import_data.loc[import_data.qty == 0, 'qty'] = import_data.loc[import_data.qty == 0, 'altQty']
         # don't need AtlQty afterwards and drop zero values
@@ -606,31 +630,37 @@ class Regioinvent:
         # check units match for all data
         assert len(set(import_data.loc[import_data.qty != 0, 'qtyUnitAbbr']) - {'N/A'}) == 1
 
+        # remove artefacts of domestic trade from international trade data
+        import_data = import_data.drop(
+            [i for i in import_data.index if import_data.reporterISO[i] == import_data.partnerISO[i]])
+        # concatenate import and domestic data
+        consumption_data = pd.concat([import_data, self.domestic_data.loc[:, import_data.columns]])
+
         for product in self.hs_class_to_eco:
-            cmd_import_data = import_data[import_data.cmdCode == product].copy('deep')
+            cmd_consumption_data = consumption_data[consumption_data.cmdCode == product].copy('deep')
             # calculate the average import volume for each country
-            cmd_import_data = cmd_import_data.groupby(['reporterISO', 'partnerISO']).agg({'qty': 'mean'})
+            cmd_consumption_data = cmd_consumption_data.groupby(['reporterISO', 'partnerISO']).agg({'qty': 'mean'})
             # change to relative
-            importers = (cmd_import_data.groupby(level=0).sum() / cmd_import_data.sum().sum()).sort_values(
+            importers = (cmd_consumption_data.groupby(level=0).sum() / cmd_consumption_data.sum().sum()).sort_values(
                 by='qty', ascending=False)
             # only keep importers till the 99% of total imports
             limit = importers.index.get_loc(importers[importers.cumsum() > 0.99].dropna().index[0]) + 1
             # aggregate the rest
-            remainder = cmd_import_data.loc[importers.index[limit:]].groupby(level=1).sum()
-            cmd_import_data = cmd_import_data.loc[importers.index[:limit]]
+            remainder = cmd_consumption_data.loc[importers.index[limit:]].groupby(level=1).sum()
+            cmd_consumption_data = cmd_consumption_data.loc[importers.index[:limit]]
             # assign the aggregate to RoW
-            cmd_import_data = pd.concat([cmd_import_data, pd.concat([remainder], keys=['RoW'])])
-            cmd_import_data.index = pd.MultiIndex.from_tuples([i for i in cmd_import_data.index])
-            cmd_import_data = cmd_import_data.sort_index()
+            cmd_consumption_data = pd.concat([cmd_consumption_data, pd.concat([remainder], keys=['RoW'])])
+            cmd_consumption_data.index = pd.MultiIndex.from_tuples([i for i in cmd_consumption_data.index])
+            cmd_consumption_data = cmd_consumption_data.sort_index()
             # for each importer, calculate the relative shares of each country it is importing from
-            for importer in cmd_import_data.index.levels[0]:
-                cmd_import_data.loc[importer, 'qty'] = (
-                        cmd_import_data.loc[importer, 'qty'] / cmd_import_data.loc[importer, 'qty'].sum()).values
+            for importer in cmd_consumption_data.index.levels[0]:
+                cmd_consumption_data.loc[importer, 'qty'] = (
+                        cmd_consumption_data.loc[importer, 'qty'] / cmd_consumption_data.loc[importer, 'qty'].sum()).values
             # we need to add the aggregate to potentially already existing RoW exchanges
-            cmd_import_data = pd.concat([cmd_import_data.drop('RoW'),
-                                         pd.concat([cmd_import_data.loc['RoW'].groupby(level=0).sum()], keys=['RoW'])])
+            cmd_consumption_data = pd.concat([cmd_consumption_data.drop('RoW'),
+                                         pd.concat([cmd_consumption_data.loc['RoW'].groupby(level=0).sum()], keys=['RoW'])])
             # create the consumption markets
-            for importer in cmd_import_data.index.levels[0]:
+            for importer in cmd_consumption_data.index.levels[0]:
                 new_import_data = bw2.Database("Regioinvent").new_activity(uuid.uuid4().hex)
                 new_import_data['name'] = 'consumption market for ' + self.hs_class_to_eco[product]
                 new_import_data['reference product'] = self.hs_class_to_eco[product]
@@ -648,7 +678,7 @@ class Regioinvent:
                                               (i.as_dict()['reference product'] == self.hs_class_to_eco[product] and
                                                'consumption market' not in i.as_dict()['name'])]
 
-                for trading_partner in cmd_import_data.loc[importer].index:
+                for trading_partner in cmd_consumption_data.loc[importer].index:
                     if trading_partner in available_trading_partners:
                         trading_partner_key = [i for i in bw2.Database('Regioinvent').search(
                             self.hs_class_to_eco[product], limit=1000) if (
@@ -657,7 +687,7 @@ class Regioinvent:
                                 i.as_dict()['location'] == trading_partner)][0].key
                         new_trade_exc = new_import_data.new_exchange(
                             input=trading_partner_key,
-                            amount=cmd_import_data.loc[(importer, trading_partner), 'qty'],
+                            amount=cmd_consumption_data.loc[(importer, trading_partner), 'qty'],
                             type='technosphere', name=self.hs_class_to_eco[product])
                         new_trade_exc.save()
                     elif trading_partner in self.country_to_ecoinvent_regions and self.country_to_ecoinvent_regions[
@@ -669,7 +699,7 @@ class Regioinvent:
                           self.country_to_ecoinvent_regions[trading_partner])][0].key
                         new_trade_exc = new_import_data.new_exchange(
                             input=trading_partner_key,
-                            amount=cmd_import_data.loc[(importer, trading_partner), 'qty'],
+                            amount=cmd_consumption_data.loc[(importer, trading_partner), 'qty'],
                             type='technosphere', name=self.hs_class_to_eco[product])
                         new_trade_exc.save()
                     else:
@@ -679,7 +709,7 @@ class Regioinvent:
                           'consumption market' not in i.as_dict()['name'] and i.as_dict()['location'] == 'RoW')][0].key
                         new_trade_exc = new_import_data.new_exchange(
                             input=trading_partner_key,
-                            amount=cmd_import_data.loc[(importer, trading_partner), 'qty'],
+                            amount=cmd_consumption_data.loc[(importer, trading_partner), 'qty'],
                             type='technosphere', name=self.hs_class_to_eco[product])
                         new_trade_exc.save()
 
