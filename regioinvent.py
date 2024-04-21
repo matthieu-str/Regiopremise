@@ -45,8 +45,8 @@ class Regioinvent:
         self.name_regionalized_biosphere_database = 'biosphere_regionalized_biosphere_flows'
         self.conn = sqlite3.connect(trade_database_path)
 
-        with open(pkg_resources.resource_filename(__name__, '/Data/HS_to_ecoinvent_name.json'), 'r') as f:
-            self.hs_class_to_eco = json.load(f)
+        with open(pkg_resources.resource_filename(__name__, '/Data/ecoinvent_to_HS.json'), 'r') as f:
+            self.eco_to_hs_class = json.load(f)
         with open(pkg_resources.resource_filename(__name__, '/Data/HS_to_exiobase_name.json'), 'r') as f:
             self.hs_class_to_exio = json.load(f)
         with open(pkg_resources.resource_filename(__name__, '/Data/country_to_ecoinvent_regions.json'), 'r') as f:
@@ -362,8 +362,8 @@ class Regioinvent:
                                   self.domestic_data.loc[:, 'domestic use (%)'] / 100)
         self.domestic_data.partnerISO = self.domestic_data.reporterISO
 
-        for product in self.hs_class_to_eco:
-            cmd_export_data = export_data[export_data.cmdCode == product].copy('deep')
+        for product in self.eco_to_hs_class:
+            cmd_export_data = export_data[export_data.cmdCode == self.eco_to_hs_class[product]].copy('deep')
             # calculate the average export volume for each country
             cmd_export_data = cmd_export_data.groupby('reporterISO').agg({'qty': 'mean'})
             exporters = (cmd_export_data.qty / cmd_export_data.qty.sum()).sort_values(ascending=False)
@@ -376,14 +376,14 @@ class Regioinvent:
             else:
                 exporters.loc['RoW'] = remainder
             production_archetypes = [i for i in bw2.Database(self.new_regionalized_ecoinvent_database_name).search(
-                self.hs_class_to_eco[product]) if i.as_dict()['reference product'] == self.hs_class_to_eco[product] and
+                product) if i.as_dict()['reference product'] == product and
                                      "market" not in i.as_dict()['name']]
             available_geographies = [i.as_dict()['location'] for i in production_archetypes]
 
             # create a global market activity for the commodity
             global_market_activity = bw2.Database(self.regioinvent_database_name).new_activity(uuid.uuid4().hex)
-            global_market_activity['name'] = 'production market for ' + self.hs_class_to_eco[product]
-            global_market_activity['reference product'] = self.hs_class_to_eco[product]
+            global_market_activity['name'] = 'production market for ' + product
+            global_market_activity['reference product'] = product
             global_market_activity['type'] = 'process'
             global_market_activity['unit'] = 'kilogram'
             global_market_activity.save()
@@ -553,8 +553,12 @@ class Regioinvent:
                             new_water_exc.save()
 
                 else:
-                    # copy activity from reference
-                    new_act = copy_reference_process("RoW", exporter)
+                    try:
+                        # take RoW by default
+                        new_act = copy_reference_process("RoW", exporter)
+                    except IndexError:
+                        # if no RoW production exist, default will be GLO
+                        new_act = copy_reference_process("GLO", exporter)
 
                     # check if process uses inputs that can already be regionalized.
                     electricity_input = self.test_input_presence(new_act, 'electricity', 'technosphere')
@@ -638,8 +642,8 @@ class Regioinvent:
         # concatenate import and domestic data
         consumption_data = pd.concat([import_data, self.domestic_data.loc[:, import_data.columns]])
 
-        for product in self.hs_class_to_eco:
-            cmd_consumption_data = consumption_data[consumption_data.cmdCode == product].copy('deep')
+        for product in self.eco_to_hs_class:
+            cmd_consumption_data = consumption_data[consumption_data.cmdCode == self.eco_to_hs_class[product]].copy('deep')
             # calculate the average import volume for each country
             cmd_consumption_data = cmd_consumption_data.groupby(['reporterISO', 'partnerISO']).agg({'qty': 'mean'})
             # change to relative
@@ -664,8 +668,8 @@ class Regioinvent:
             # create the consumption markets
             for importer in cmd_consumption_data.index.levels[0]:
                 new_import_data = bw2.Database(self.regioinvent_database_name).new_activity(uuid.uuid4().hex)
-                new_import_data['name'] = 'consumption market for ' + self.hs_class_to_eco[product]
-                new_import_data['reference product'] = self.hs_class_to_eco[product]
+                new_import_data['name'] = 'consumption market for ' + product
+                new_import_data['reference product'] = product
                 new_import_data['location'] = importer
                 new_import_data['type'] = 'process'
                 new_import_data['unit'] = 'kilogram'
@@ -675,44 +679,42 @@ class Regioinvent:
                 new_exc.save()
 
                 available_trading_partners = [i.as_dict()['location'] for i in
-                                              bw2.Database(self.regioinvent_database_name).search(
-                                                  self.hs_class_to_eco[product], limit=1000) if
-                                              (i.as_dict()['reference product'] == self.hs_class_to_eco[product] and
+                                              bw2.Database(self.regioinvent_database_name).search(product, limit=1000) if
+                                              (i.as_dict()['reference product'] == product and
                                                'consumption market' not in i.as_dict()['name'])]
 
                 for trading_partner in cmd_consumption_data.loc[importer].index:
                     if trading_partner in available_trading_partners:
                         trading_partner_key = [i for i in bw2.Database(self.regioinvent_database_name).search(
-                            self.hs_class_to_eco[product], limit=1000) if (
-                                i.as_dict()['reference product'] == self.hs_class_to_eco[product] and
+                            product, limit=1000) if (i.as_dict()['reference product'] == product and
                                 'consumption market' not in i.as_dict()['name'] and
                                 i.as_dict()['location'] == trading_partner)][0].key
                         new_trade_exc = new_import_data.new_exchange(
                             input=trading_partner_key,
                             amount=cmd_consumption_data.loc[(importer, trading_partner), 'qty'],
-                            type='technosphere', name=self.hs_class_to_eco[product])
+                            type='technosphere', name=product)
                         new_trade_exc.save()
                     elif trading_partner in self.country_to_ecoinvent_regions and self.country_to_ecoinvent_regions[
                         trading_partner] in available_trading_partners:
                         trading_partner_key = [i for i in bw2.Database(self.regioinvent_database_name).search(
-                            self.hs_class_to_eco[product], limit=1000) if
-                         (i.as_dict()['reference product'] == self.hs_class_to_eco[product] and
+                            product, limit=1000) if
+                         (i.as_dict()['reference product'] == product and
                           'consumption market' not in i.as_dict()['name'] and i.as_dict()['location'] ==
                           self.country_to_ecoinvent_regions[trading_partner])][0].key
                         new_trade_exc = new_import_data.new_exchange(
                             input=trading_partner_key,
                             amount=cmd_consumption_data.loc[(importer, trading_partner), 'qty'],
-                            type='technosphere', name=self.hs_class_to_eco[product])
+                            type='technosphere', name=product)
                         new_trade_exc.save()
                     else:
                         trading_partner_key = [i for i in bw2.Database(self.regioinvent_database_name).search(
-                            self.hs_class_to_eco[product], limit=1000) if
-                         (i.as_dict()['reference product'] == self.hs_class_to_eco[product] and
+                            product, limit=1000) if
+                         (i.as_dict()['reference product'] == product and
                           'consumption market' not in i.as_dict()['name'] and i.as_dict()['location'] == 'RoW')][0].key
                         new_trade_exc = new_import_data.new_exchange(
                             input=trading_partner_key,
                             amount=cmd_consumption_data.loc[(importer, trading_partner), 'qty'],
-                            type='technosphere', name=self.hs_class_to_eco[product])
+                            type='technosphere', name=product)
                         new_trade_exc.save()
 
                 # check for duplicate input codes with different values (coming from RoW)
@@ -727,7 +729,6 @@ class Regioinvent:
                                                            amount=total, name=name, type='technosphere')
                     new_exc.save()
 
-
     def second_order_regionalization(self):
 
         self.logger.info("Performing second order regionalization...")
@@ -737,27 +738,31 @@ class Regioinvent:
                 # if it's an ecoinvent input
                 if inputt.as_dict()['input'][0] == self.new_regionalized_ecoinvent_database_name:
                     # check if we regionalized the commodity
-                    if inputt.as_dict()['name'] in self.hs_class_to_eco.values():
+                    if inputt.as_dict()['name'] in self.eco_to_hs_class.keys():
                         exchange_amount = sum([i.amount for i in process.technosphere() if
                                                i.as_dict()['name'] == inputt.as_dict()['name']])
                         available_geographies = [j.as_dict()['location'] for j in
-                                                 bw2.Database(self.regioinvent_database_name).search('consumption market', limit=1000) if
+                                                 bw2.Database(self.regioinvent_database_name).search('consumption market',
+                                                     limit=len(bw2.Database(self.regioinvent_database_name))) if
                                                  j.as_dict()['reference product'] == inputt.as_dict()['name']]
                         if process.as_dict()['location'] in available_geographies:
                             new_exchange_key = \
-                            [j for j in bw2.Database(self.regioinvent_database_name).search('consumption market', limit=1000) if (
+                            [j for j in bw2.Database(self.regioinvent_database_name).search(
+                                'consumption market', limit=len(bw2.Database(self.regioinvent_database_name))) if (
                                     j.as_dict()['reference product'] == inputt.as_dict()['name'] and j.as_dict()[
                                 'location'] == process.as_dict()['location'])][0].key
                         elif (process.as_dict()['location'] in self.country_to_ecoinvent_regions and
                               self.country_to_ecoinvent_regions[process.as_dict()['location']] in available_geographies):
                             new_exchange_key = \
-                            [j for j in bw2.Database(self.regioinvent_database_name).search('consumption market', limit=1000) if (
+                            [j for j in bw2.Database(self.regioinvent_database_name).search(
+                                'consumption market', limit=len(bw2.Database(self.regioinvent_database_name))) if (
                                     j.as_dict()['reference product'] == inputt.as_dict()['name'] and j.as_dict()[
                                 'location'] ==
                                     self.country_to_ecoinvent_regions[process.as_dict()['location']])][0].key
                         else:
                             new_exchange_key = \
-                            [j for j in bw2.Database(self.regioinvent_database_name).search('consumption market', limit=1000) if (
+                            [j for j in bw2.Database(self.regioinvent_database_name).search(
+                                'consumption market', limit=len(bw2.Database(self.regioinvent_database_name))) if (
                                     j.as_dict()['reference product'] == inputt.as_dict()['name'] and j.as_dict()[
                                 'location'] == 'RoW')][0].key
 
