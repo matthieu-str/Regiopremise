@@ -23,7 +23,8 @@ import collections
 
 
 class Regioinvent:
-    def __init__(self, trade_database_path, regioinvent_database_name, bw_project_name, ecoinvent_database_name):
+    def __init__(self, trade_database_path, regioinvent_database_name, bw_project_name, ecoinvent_database_name,
+                 reset_regioinvent=False):
 
         # set up logging tool
         self.logger = logging.getLogger('Regioinvent')
@@ -43,7 +44,7 @@ class Regioinvent:
         self.regioinvent_database_name = regioinvent_database_name
         self.ecoinvent_database_name = ecoinvent_database_name
         self.new_regionalized_ecoinvent_database_name = ecoinvent_database_name + ' biosphere flows regionalized'
-        self.name_regionalized_biosphere_database = 'biosphere_regionalized_biosphere_flows'
+        self.name_regionalized_biosphere_database = 'biosphere3_regionalized_flows'
         self.trade_conn = sqlite3.connect(trade_database_path)
         self.ecoinvent_conn = sqlite3.connect(bw2.Database(self.regioinvent_database_name).filepath_processed().split(
             '\\processed\\')[0] + '\\lci\\databases.db')
@@ -55,8 +56,8 @@ class Regioinvent:
             self.hs_class_to_exio = json.load(f)
         with open(pkg_resources.resource_filename(__name__, '/Data/country_to_ecoinvent_regions.json'), 'r') as f:
             self.country_to_ecoinvent_regions = json.load(f)
-        with open(pkg_resources.resource_filename(__name__, '/Data/country_to_ecoinvent_regions.json'), 'r') as f:
-            self.country_to_exiobase_regions = json.load(f)
+        with open(pkg_resources.resource_filename(__name__, '/Data/electricity_processes.json'), 'r') as f:
+            self.electricity_geos = json.load(f)
         with open(pkg_resources.resource_filename(__name__, '/Data/heat_industrial_ng_processes.json'), 'r') as f:
             self.heat_district_ng = json.load(f)
         with open(pkg_resources.resource_filename(__name__, '/Data/heat_industrial_non_ng_processes.json'), 'r') as f:
@@ -76,23 +77,40 @@ class Regioinvent:
                                          'Water, well, in ground']
 
         if self.regioinvent_database_name in bw2.databases:
-            self.logger.info("Overwriting existing "+self.regioinvent_database_name+" database...")
-            del bw2.databases[self.regioinvent_database_name]
+            if reset_regioinvent:
+                self.logger.info("Resetting existing " + self.regioinvent_database_name + " database...")
+                del bw2.databases[self.regioinvent_database_name]
+            else:
+                self.logger.info("Seems you already had some progress towards compiling " +
+                                 self.regioinvent_database_name + ". Let us restart where you left off.")
 
-        self.logger.info("Creating empty database for "+self.regioinvent_database_name+"...")
-        self.create_empty_bw2_database(self.regioinvent_database_name)
+        if self.regioinvent_database_name not in bw2.databases:
+            self.logger.info("Creating empty database for "+self.regioinvent_database_name+"...")
+            self.create_empty_bw2_database(self.regioinvent_database_name)
 
         if self.name_regionalized_biosphere_database not in bw2.databases:
-            self.logger.info("Creating regionalized biosphere database...")
+            self.logger.info("Creating regionalized biosphere flows...")
             self.create_regionalized_biosphere_flows()
 
         if self.new_regionalized_ecoinvent_database_name not in bw2.databases:
-            self.logger.info("Creating regionalized ecoinvent database...")
+            self.logger.info("Creating ecoinvent database connected to regionalized biosphere flows...")
             self.create_ecoinvent_with_regionalized_biosphere_flows()
 
         if 'IMPACT World+ Damage 2.0.1_regionalized' not in [i[0] for i in list(bw2.methods)]:
             self.logger.info("Linking regionalized LCIA method to regionalized biosphere database...")
             self.link_regionalized_biosphere_to_regionalized_CFs()
+
+        # if user interrupted compilation and locked database, need to delete what we couldnt delete in the previous run
+        with open(pkg_resources.resource_filename(__name__, '/Data/to_delete_because_of_interruption.json'), 'r') as f:
+            to_delete = json.load(f)
+        if to_delete:
+            self.logger.info("Deleting the incomplete transaction from last time...")
+            [bw2.Database(self.regioinvent_database_name).get(i).delete() for i in self.ecoinvent_cursor.execute(
+                f"""SELECT code FROM activitydataset WHERE product='{to_delete[0]}' AND 
+                            database='{self.regioinvent_database_name}'""").fetchall()]
+            # need to reset the list to delete
+            with open(pkg_resources.resource_filename(__name__,'/Data/to_delete_because_of_interruption.json'),'w') as f:
+                json.dump([], f)
 
     def create_regionalized_biosphere_flows(self):
 
@@ -346,8 +364,39 @@ class Regioinvent:
         # don't need AtlQty afterwards and drop zero values
         export_data = export_data.drop('altQty', axis=1)
         export_data = export_data.loc[export_data.qty != 0]
-        # check units match for all data
-        assert len(set(export_data.loc[export_data.qty != 0, 'qtyUnitAbbr']) - {'N/A'}) == 1
+        # DEAL WITH UNITS IN TRADE DATA
+        # remove mistakes in units from data reporter
+        export_data = export_data.drop([i for i in export_data.index if (
+                    (export_data.loc[i, 'cmdCode'] == '7005' and export_data.loc[i, 'qtyUnitAbbr'] == 'kg') or
+                    (export_data.loc[i, 'cmdCode'] == '850720' and export_data.loc[i, 'qtyUnitAbbr'] in ['kg',
+                                                                                                         'ce/el']) or
+                    (export_data.loc[i, 'cmdCode'] == '280421' and export_data.loc[i, 'qtyUnitAbbr'] == 'u') or
+                    (export_data.loc[i, 'cmdCode'] == '280440' and export_data.loc[i, 'qtyUnitAbbr'] == 'u'))])
+        # convert data in different units
+        export_data.loc[[i for i in export_data.index if export_data.loc[i, 'cmdCode'] == '2804' and export_data.loc[
+            i, 'qtyUnitAbbr'] == 'kg'], 'qty'] /= 0.08375  # kg/m3 density of hydrogen
+        export_data.loc[[i for i in export_data.index if export_data.loc[i, 'cmdCode'] == '280421' and export_data.loc[
+            i, 'qtyUnitAbbr'] == 'kg'], 'qty'] /= 1.784  # kg/m3 density of argon
+        export_data.loc[[i for i in export_data.index if export_data.loc[i, 'cmdCode'] == '280429' and export_data.loc[
+            i, 'qtyUnitAbbr'] == 'kg'], 'qty'] /= 0.166  # kg/m3 density of helium
+        export_data.loc[[i for i in export_data.index if export_data.loc[i, 'cmdCode'] == '4412' and export_data.loc[
+            i, 'qtyUnitAbbr'] == 'kg'], 'qty'] /= 700  # kg/m3 density of wood
+        # change unit name
+        export_data.loc[[i for i in export_data.index if export_data.loc[i, 'cmdCode'] == '2804' and export_data.loc[
+            i, 'qtyUnitAbbr'] == 'kg'], 'qtyUnitAbbr'] = 'm³'
+        export_data.loc[[i for i in export_data.index if export_data.loc[i, 'cmdCode'] == '280421' and export_data.loc[
+            i, 'qtyUnitAbbr'] == 'kg'], 'qtyUnitAbbr'] = 'm³'
+        export_data.loc[[i for i in export_data.index if export_data.loc[i, 'cmdCode'] == '280429' and export_data.loc[
+            i, 'qtyUnitAbbr'] == 'kg'], 'qtyUnitAbbr'] = 'm³'
+        export_data.loc[[i for i in export_data.index if export_data.loc[i, 'cmdCode'] == '4412' and export_data.loc[
+            i, 'qtyUnitAbbr'] == 'kg'], 'qtyUnitAbbr'] = 'm³'
+        # check there are no other instances of data in multiple units
+        data_in_kg = set(export_data.loc[export_data.qtyUnitAbbr == 'kg'].cmdCode)
+        data_in_L = set(export_data.loc[export_data.qtyUnitAbbr == 'l'].cmdCode)
+        data_in_m2 = set(export_data.loc[export_data.qtyUnitAbbr == 'm²'].cmdCode)
+        data_in_m3 = set(export_data.loc[export_data.qtyUnitAbbr == 'm³'].cmdCode)
+        data_in_u = set(export_data.loc[export_data.qtyUnitAbbr == 'u'].cmdCode)
+        assert not (data_in_kg & data_in_L & data_in_m2 & data_in_m3 & data_in_u)
 
         self.domestic_data = export_data.copy('deep')
         self.domestic_data.loc[:, 'COMTRADE_reporter'] = self.domestic_data.reporterISO.copy()
@@ -366,117 +415,190 @@ class Regioinvent:
                                   self.domestic_data.loc[:, 'domestic use (%)'] / 100)
         self.domestic_data.partnerISO = self.domestic_data.reporterISO
 
-        for product in self.eco_to_hs_class:
-            cmd_export_data = export_data[export_data.cmdCode == self.eco_to_hs_class[product]].copy('deep')
-            # calculate the average export volume for each country
-            cmd_export_data = cmd_export_data.groupby('reporterISO').agg({'qty': 'mean'})
-            exporters = (cmd_export_data.qty / cmd_export_data.qty.sum()).sort_values(ascending=False)
-            # only keep the countries representing 99% of global exports of the product and create a RoW from that
-            limit = exporters.index.get_loc(exporters[exporters.cumsum() > 0.99].index[0]) + 1
-            remainder = exporters.iloc[limit:].sum()
-            exporters = exporters.iloc[:limit]
-            if 'RoW' in exporters.index:
-                exporters.loc['RoW'] += remainder
-            else:
-                exporters.loc['RoW'] = remainder
-            production_archetypes = [i for i in bw2.Database(self.new_regionalized_ecoinvent_database_name).search(
-                product) if i.as_dict()['reference product'] == product and
-                                     "market" not in i.as_dict()['name']]
-            available_geographies = [i.as_dict()['location'] for i in production_archetypes]
+        # identify products for which regioinvent has already been run in the past
+        previously_regionalized = set([bw2.Database(self.regioinvent_database_name).get(i).as_dict()['reference product']
+                                       for i in self.ecoinvent_cursor.execute(
+                f"""SELECT code FROM activitydataset WHERE database='{self.regioinvent_database_name}'""").fetchall()])
+        still_not_regionalized = list(set(self.eco_to_hs_class.keys()) - previously_regionalized)
+        still_not_regionalized.sort()
 
-            # create a global market activity for the commodity
-            global_market_activity = bw2.Database(self.regioinvent_database_name).new_activity(uuid.uuid4().hex)
-            global_market_activity['name'] = 'production market for ' + product
-            global_market_activity['reference product'] = product
-            global_market_activity['type'] = 'process'
-            global_market_activity['unit'] = 'kilogram'
-            global_market_activity.save()
-            # create the production flow
-            new_exc = global_market_activity.new_exchange(input=global_market_activity.key, amount=1, type='production')
-            new_exc.save()
+        try:
+            for product in still_not_regionalized:
+                cmd_export_data = export_data[export_data.cmdCode.isin([self.eco_to_hs_class[product]])].copy('deep')
+                # calculate the average export volume for each country
+                cmd_export_data = cmd_export_data.groupby('reporterISO').agg({'qty': 'mean'})
+                exporters = (cmd_export_data.qty / cmd_export_data.qty.sum()).sort_values(ascending=False)
+                # only keep the countries representing 99% of global exports of the product and create a RoW from that
+                limit = exporters.index.get_loc(exporters[exporters.cumsum() > 0.99].index[0]) + 1
+                remainder = exporters.iloc[limit:].sum()
+                exporters = exporters.iloc[:limit]
+                if 'RoW' in exporters.index:
+                    exporters.loc['RoW'] += remainder
+                else:
+                    exporters.loc['RoW'] = remainder
+                production_archetypes = [bw2.Database(self.new_regionalized_ecoinvent_database_name).get(j) for j in
+                                         [i[0] for i in self.ecoinvent_cursor.execute(
+                                             f"""SELECT code FROM activitydataset WHERE product='{product}' AND 
+                    database='{self.new_regionalized_ecoinvent_database_name}' AND name NOT LIKE '%market%'""").fetchall()]]
+                available_geographies = [i.as_dict()['location'] for i in production_archetypes]
 
-            def copy_reference_process(reference_geography, new_geography):
-                reference_activity = [i for i in production_archetypes if i.as_dict()['location'] == reference_geography][0]
-                new_act = reference_activity.copy()
-                new_act.update({'database': self.regioinvent_database_name})
-                new_act.update({'location': new_geography})
-                new_act.save()
-                # add new activity to global market
-                new_exc = global_market_activity.new_exchange(input=new_act.key, amount=exporters.loc[new_geography],
-                                                              type='technosphere')
+                # create a global market activity for the commodity
+                global_market_activity = bw2.Database(self.regioinvent_database_name).new_activity(uuid.uuid4().hex)
+                global_market_activity['name'] = 'production market for ' + product
+                global_market_activity['reference product'] = product
+                global_market_activity['type'] = 'process'
+                global_market_activity['unit'] = 'kilogram'
+                global_market_activity.save()
+                # create the production flow
+                new_exc = global_market_activity.new_exchange(input=global_market_activity.key, amount=1, type='production')
                 new_exc.save()
-                return new_act
 
-            for exporter in exporters.index:
-                if exporter in available_geographies and exporter not in ['RoW']:
-                    # copy activity from reference
-                    new_act = copy_reference_process(exporter, exporter)
+                def copy_reference_process(reference_geography, new_geography):
+                    reference_activity = [i for i in production_archetypes if i.as_dict()['location'] == reference_geography][0]
+                    new_act = reference_activity.copy()
+                    new_act.update({'database': self.regioinvent_database_name})
+                    new_act.update({'location': new_geography})
+                    new_act.save()
+                    # add new activity to global market
+                    new_exc = global_market_activity.new_exchange(input=new_act.key, amount=exporters.loc[new_geography],
+                                                                  type='technosphere')
+                    new_exc.save()
+                    return new_act
 
-                    # check if process uses inputs that can already be regionalized.
-                    electricity_input = self.test_input_presence(new_act, 'electricity', 'technosphere')
-                    waste_input = self.test_input_presence(new_act, 'municipal solid waste', 'technosphere')
-                    heat_district_ng_input = self.test_input_presence(
-                        new_act, 'heat, district or industrial, natural gas', 'technosphere')
-                    heat_district_non_ng_input = self.test_input_presence(
-                        new_act, 'heat, district or industrial, other than natural gas', 'technosphere')
-                    heat_small_scale_non_ng_input = self.test_input_presence(
-                        new_act, 'heat, central or small-scale, other than natural gas', 'technosphere')
-                    water_input = self.test_input_presence(new_act, self.water_flows_in_ecoinvent, 'biosphere',
-                                                           region=exporter)
+                for exporter in exporters.index:
+                    if exporter in available_geographies and exporter not in ['RoW']:
+                        # copy activity from reference
+                        new_act = copy_reference_process(exporter, exporter)
 
-                    # check if electricity needs spatialization for country (maybe it is already spatialized)
-                    if electricity_input:
-                        if ([bw2.Database(self.new_regionalized_ecoinvent_database_name).get(i.input[1]) for i in new_act.exchanges()
-                             if 'electricity' in i.as_dict()['name']][0].as_dict()['location'] != exporter):
+                        # check if process uses inputs that can already be regionalized.
+                        electricity_input = self.test_input_presence(new_act, 'electricity', 'technosphere')
+                        waste_input = self.test_input_presence(new_act, 'municipal solid waste', 'technosphere')
+                        heat_district_ng_input = self.test_input_presence(
+                            new_act, 'heat, district or industrial, natural gas', 'technosphere')
+                        heat_district_non_ng_input = self.test_input_presence(
+                            new_act, 'heat, district or industrial, other than natural gas', 'technosphere')
+                        heat_small_scale_non_ng_input = self.test_input_presence(
+                            new_act, 'heat, central or small-scale, other than natural gas', 'technosphere')
+                        water_input = self.test_input_presence(new_act, 'water', 'biosphere', region=exporter)
+
+                        # check if electricity needs spatialization for country (maybe it is already spatialized)
+                        if electricity_input:
+                            if ([bw2.Database(self.new_regionalized_ecoinvent_database_name).get(i.input[1]) for i in new_act.exchanges()
+                                 if 'electricity' in i.as_dict()['name']][0].as_dict()['location'] != exporter):
+                                # spatialize electricity
+                                key, amount, name = self.change_electricity(new_act, exporter)
+                                new_elec_exc = new_act.new_exchange(input=key, amount=amount, type='technosphere', name=name)
+                                new_elec_exc.save()
+                        if waste_input:
+                            if ([bw2.Database(self.new_regionalized_ecoinvent_database_name).get(i.input[1]) for i in new_act.exchanges()
+                                 if 'municipal solid waste' in i.as_dict()['name']][0].as_dict()['location'] != exporter):
+                                # spatialize waste
+                                key, amount = self.change_waste(new_act, exporter)
+                                new_waste_exc = new_act.new_exchange(input=key, amount=amount, type='technosphere',
+                                                                     name='municipal solid waste')
+                                new_waste_exc.save()
+                        if heat_district_ng_input:
+                            # check if heat needs spatialization for country
+                            heat_flow = 'heat, district or industrial, natural gas'
+                            if ([bw2.Database(self.new_regionalized_ecoinvent_database_name).get(i.input[1]) for i in new_act.exchanges()
+                                 if heat_flow in i.as_dict()['name']][0].as_dict()['location'] != exporter):
+                                # spatialize heat
+                                distrib_heat = self.change_heat(new_act, exporter, heat_flow)
+                                for heat_flow in distrib_heat:
+                                    new_heat_exc = new_act.new_exchange(input=heat_flow[0], amount=heat_flow[1],
+                                                                        type='technosphere', name=heat_flow)
+                                    new_heat_exc.save()
+                        if heat_district_non_ng_input:
+                            # check if heat needs spatialization for country
+                            heat_flow = 'heat, district or industrial, other than natural gas'
+                            if ([bw2.Database(self.new_regionalized_ecoinvent_database_name).get(i.input[1]) for i in new_act.exchanges()
+                                 if heat_flow in i.as_dict()['name']][0].as_dict()['location'] != exporter):
+                                # spatialize heat
+                                distrib_heat = self.change_heat(new_act, exporter, heat_flow)
+                                for heat_flow in distrib_heat:
+                                    new_heat_exc = new_act.new_exchange(input=heat_flow[0], amount=heat_flow[1],
+                                                                        type='technosphere', name=heat_flow)
+                                    new_heat_exc.save()
+                        if heat_small_scale_non_ng_input:
+                            # check if heat needs spatialization for country
+                            heat_flow = 'heat, central or small-scale, other than natural gas'
+                            if ([bw2.Database(self.new_regionalized_ecoinvent_database_name).get(i.input[1]) for i in new_act.exchanges()
+                                 if heat_flow in i.as_dict()['name']][0].as_dict()['location'] != exporter):
+                                # spatialize heat
+                                distrib_heat = self.change_heat(new_act, exporter, heat_flow)
+                                for heat_flow in distrib_heat:
+                                    new_heat_exc = new_act.new_exchange(input=heat_flow[0], amount=heat_flow[1],
+                                                                        type='technosphere', name=heat_flow)
+                                    new_heat_exc.save()
+                        if water_input:
+                            # check if water elementary flows need spatialization for country
+                            if new_act.as_dict()['location'] != exporter:
+                                water_values = self.change_water(new_act, exporter)
+                                for water_type in water_values:
+                                    new_water_exc = new_act.new_exchange(
+                                        input=water_values[water_type]['key'],
+                                        amount=water_values[water_type]['amount'],
+                                        type='biosphere',
+                                        name=bw2.Database(self.name_regionalized_biosphere_database).get(
+                                            water_values[water_type]['key'][1]).as_dict()['name'],
+                                        flow=water_values[water_type]['key'][1])
+                                    new_water_exc.save()
+
+                    elif (exporter in self.country_to_ecoinvent_regions and
+                          self.country_to_ecoinvent_regions[exporter] in available_geographies):
+                        # copy activity from reference
+                        new_act = copy_reference_process(self.country_to_ecoinvent_regions[exporter], exporter)
+
+                        # check if process uses inputs that can already be regionalized.
+                        electricity_input = self.test_input_presence(new_act, 'electricity', 'technosphere')
+                        waste_input = self.test_input_presence(new_act, 'municipal solid waste', 'technosphere')
+                        heat_district_ng_input = self.test_input_presence(
+                            new_act, 'heat, district or industrial, natural gas', 'technosphere')
+                        heat_district_non_ng_input = self.test_input_presence(
+                            new_act, 'heat, district or industrial, other than natural gas', 'technosphere')
+                        heat_small_scale_non_ng_input = self.test_input_presence(
+                            new_act, 'heat, central or small-scale, other than natural gas', 'technosphere')
+                        water_input = self.test_input_presence(new_act, 'water', 'biosphere',
+                                                               region=self.country_to_ecoinvent_regions[exporter])
+
+                        if electricity_input:
                             # spatialize electricity
                             key, amount, name = self.change_electricity(new_act, exporter)
                             new_elec_exc = new_act.new_exchange(input=key, amount=amount, type='technosphere', name=name)
                             new_elec_exc.save()
-                    if waste_input:
-                        if ([bw2.Database(self.new_regionalized_ecoinvent_database_name).get(i.input[1]) for i in new_act.exchanges()
-                             if 'municipal solid waste' in i.as_dict()['name']][0].as_dict()['location'] != exporter):
+                        if waste_input:
                             # spatialize waste
                             key, amount = self.change_waste(new_act, exporter)
                             new_waste_exc = new_act.new_exchange(input=key, amount=amount, type='technosphere',
                                                                  name='municipal solid waste')
                             new_waste_exc.save()
-                    if heat_district_ng_input:
-                        # check if heat needs spatialization for country
-                        heat_flow = 'heat, district or industrial, natural gas'
-                        if ([bw2.Database(self.new_regionalized_ecoinvent_database_name).get(i.input[1]) for i in new_act.exchanges()
-                             if heat_flow in i.as_dict()['name']][0].as_dict()['location'] != exporter):
+                        if heat_district_ng_input:
                             # spatialize heat
+                            heat_flow = 'heat, district or industrial, natural gas'
                             distrib_heat = self.change_heat(new_act, exporter, heat_flow)
                             for heat_flow in distrib_heat:
                                 new_heat_exc = new_act.new_exchange(input=heat_flow[0], amount=heat_flow[1],
                                                                     type='technosphere', name=heat_flow)
                                 new_heat_exc.save()
-                    if heat_district_non_ng_input:
-                        # check if heat needs spatialization for country
-                        heat_flow = 'heat, district or industrial, other than natural gas'
-                        if ([bw2.Database(self.new_regionalized_ecoinvent_database_name).get(i.input[1]) for i in new_act.exchanges()
-                             if heat_flow in i.as_dict()['name']][0].as_dict()['location'] != exporter):
+                        if heat_district_non_ng_input:
                             # spatialize heat
+                            heat_flow = 'heat, district or industrial, other than natural gas'
                             distrib_heat = self.change_heat(new_act, exporter, heat_flow)
                             for heat_flow in distrib_heat:
                                 new_heat_exc = new_act.new_exchange(input=heat_flow[0], amount=heat_flow[1],
                                                                     type='technosphere', name=heat_flow)
                                 new_heat_exc.save()
-                    if heat_small_scale_non_ng_input:
-                        # check if heat needs spatialization for country
-                        heat_flow = 'heat, central or small-scale, other than natural gas'
-                        if ([bw2.Database(self.new_regionalized_ecoinvent_database_name).get(i.input[1]) for i in new_act.exchanges()
-                             if heat_flow in i.as_dict()['name']][0].as_dict()['location'] != exporter):
+                        if heat_small_scale_non_ng_input:
                             # spatialize heat
+                            heat_flow = 'heat, central or small-scale, other than natural gas'
                             distrib_heat = self.change_heat(new_act, exporter, heat_flow)
                             for heat_flow in distrib_heat:
                                 new_heat_exc = new_act.new_exchange(input=heat_flow[0], amount=heat_flow[1],
                                                                     type='technosphere', name=heat_flow)
                                 new_heat_exc.save()
-                    if water_input:
-                        # check if water elementary flows need spatialization for country
-                        if new_act.as_dict()['location'] != exporter:
-                            water_values = self.change_water(new_act, exporter)
+                        if water_input:
+                            water_values = self.change_water(new_act, exporter,
+                                                             region=self.country_to_ecoinvent_regions[exporter])
                             for water_type in water_values:
                                 new_water_exc = new_act.new_exchange(
                                     input=water_values[water_type]['key'],
@@ -487,146 +609,93 @@ class Regioinvent:
                                     flow=water_values[water_type]['key'][1])
                                 new_water_exc.save()
 
-                elif (exporter in self.country_to_ecoinvent_regions and
-                      self.country_to_ecoinvent_regions[exporter] in available_geographies):
-                    # copy activity from reference
-                    new_act = copy_reference_process(self.country_to_ecoinvent_regions[exporter], exporter)
-
-                    # check if process uses inputs that can already be regionalized.
-                    electricity_input = self.test_input_presence(new_act, 'electricity', 'technosphere')
-                    waste_input = self.test_input_presence(new_act, 'municipal solid waste', 'technosphere')
-                    heat_district_ng_input = self.test_input_presence(
-                        new_act, 'heat, district or industrial, natural gas', 'technosphere')
-                    heat_district_non_ng_input = self.test_input_presence(
-                        new_act, 'heat, district or industrial, other than natural gas', 'technosphere')
-                    heat_small_scale_non_ng_input = self.test_input_presence(
-                        new_act, 'heat, central or small-scale, other than natural gas', 'technosphere')
-                    water_input = self.test_input_presence(new_act, self.water_flows_in_ecoinvent, 'biosphere',
-                                                         region=self.country_to_ecoinvent_regions[exporter])
-
-                    if electricity_input:
-                        # spatialize electricity
-                        key, amount, name = self.change_electricity(new_act, exporter)
-                        new_elec_exc = new_act.new_exchange(input=key, amount=amount, type='technosphere', name=name)
-                        new_elec_exc.save()
-                    if waste_input:
-                        # spatialize waste
-                        key, amount = self.change_waste(new_act, exporter)
-                        new_waste_exc = new_act.new_exchange(input=key, amount=amount, type='technosphere',
-                                                             name='municipal solid waste')
-                        new_waste_exc.save()
-                    if heat_district_ng_input:
-                        # spatialize heat
-                        heat_flow = 'heat, district or industrial, natural gas'
-                        distrib_heat = self.change_heat(new_act, exporter, heat_flow)
-                        for heat_flow in distrib_heat:
-                            new_heat_exc = new_act.new_exchange(input=heat_flow[0], amount=heat_flow[1],
-                                                                type='technosphere', name=heat_flow)
-                            new_heat_exc.save()
-                    if heat_district_non_ng_input:
-                        # spatialize heat
-                        heat_flow = 'heat, district or industrial, other than natural gas'
-                        distrib_heat = self.change_heat(new_act, exporter, heat_flow)
-                        for heat_flow in distrib_heat:
-                            new_heat_exc = new_act.new_exchange(input=heat_flow[0], amount=heat_flow[1],
-                                                                type='technosphere', name=heat_flow)
-                            new_heat_exc.save()
-                    if heat_small_scale_non_ng_input:
-                        # spatialize heat
-                        heat_flow = 'heat, central or small-scale, other than natural gas'
-                        distrib_heat = self.change_heat(new_act, exporter, heat_flow)
-                        for heat_flow in distrib_heat:
-                            new_heat_exc = new_act.new_exchange(input=heat_flow[0], amount=heat_flow[1],
-                                                                type='technosphere', name=heat_flow)
-                            new_heat_exc.save()
-                    if water_input:
-                        water_values = self.change_water(new_act, exporter,
-                                                         region=self.country_to_ecoinvent_regions[exporter])
-                        for water_type in water_values:
-                            new_water_exc = new_act.new_exchange(
-                                input=water_values[water_type]['key'],
-                                amount=water_values[water_type]['amount'],
-                                type='biosphere',
-                                name=bw2.Database(self.name_regionalized_biosphere_database).get(
-                                    water_values[water_type]['key'][1]).as_dict()['name'],
-                                flow=water_values[water_type]['key'][1])
-                            new_water_exc.save()
-
-                else:
-                    try:
-                        # take RoW by default
-                        new_act = copy_reference_process("RoW", exporter)
-                        global_default = False
-                    except IndexError:
-                        # if no RoW production exist, default will be GLO
-                        new_act = copy_reference_process("GLO", exporter)
-                        global_default = True
-
-                    # check if process uses inputs that can already be regionalized.
-                    electricity_input = self.test_input_presence(new_act, 'electricity', 'technosphere')
-                    waste_input = self.test_input_presence(new_act, 'municipal solid waste', 'technosphere')
-                    heat_district_ng_input = self.test_input_presence(
-                        new_act, 'heat, district or industrial, natural gas', 'technosphere')
-                    heat_district_non_ng_input = self.test_input_presence(
-                        new_act, 'heat, district or industrial, other than natural gas', 'technosphere')
-                    heat_small_scale_non_ng_input = self.test_input_presence(
-                        new_act, 'heat, central or small-scale, other than natural gas', 'technosphere')
-                    if global_default:
-                        water_input = self.test_input_presence(new_act, self.water_flows_in_ecoinvent,
-                                                               'biosphere', region="GLO")
                     else:
-                        water_input = self.test_input_presence(new_act, self.water_flows_in_ecoinvent,
-                                                               'biosphere', region="RoW")
+                        try:
+                            # take RoW by default
+                            new_act = copy_reference_process("RoW", exporter)
+                            global_default = False
+                        except IndexError:
+                            # if no RoW production exist, default will be GLO
+                            new_act = copy_reference_process("GLO", exporter)
+                            global_default = True
 
-                    if electricity_input:
-                        # spatialize electricity
-                        key, amount, name = self.change_electricity(new_act, exporter)
-                        new_elec_exc = new_act.new_exchange(input=key, amount=amount, type='technosphere', name=name)
-                        new_elec_exc.save()
-                    if waste_input:
-                        # spatialize waste
-                        key, amount = self.change_waste(new_act, exporter)
-                        new_waste_exc = new_act.new_exchange(input=key, amount=amount, type='technosphere',
-                                                             name='municipal solid waste')
-                        new_waste_exc.save()
-                    if heat_district_ng_input:
-                        # spatialize heat
-                        heat_flow = 'heat, district or industrial, natural gas'
-                        distrib_heat = self.change_heat(new_act, exporter, heat_flow)
-                        for heat_flow in distrib_heat:
-                            new_heat_exc = new_act.new_exchange(input=heat_flow[0], amount=heat_flow[1],
-                                                                type='technosphere', name=heat_flow)
-                            new_heat_exc.save()
-                    if heat_district_non_ng_input:
-                        # spatialize heat
-                        heat_flow = 'heat, district or industrial, other than natural gas'
-                        distrib_heat = self.change_heat(new_act, exporter, heat_flow)
-                        for heat_flow in distrib_heat:
-                            new_heat_exc = new_act.new_exchange(input=heat_flow[0], amount=heat_flow[1],
-                                                                type='technosphere', name=heat_flow)
-                            new_heat_exc.save()
-                    if heat_small_scale_non_ng_input:
-                        # spatialize heat
-                        heat_flow = 'heat, central or small-scale, other than natural gas'
-                        distrib_heat = self.change_heat(new_act, exporter, heat_flow)
-                        for heat_flow in distrib_heat:
-                            new_heat_exc = new_act.new_exchange(input=heat_flow[0], amount=heat_flow[1],
-                                                                type='technosphere', name=heat_flow)
-                            new_heat_exc.save()
-                    if water_input:
+                        # check if process uses inputs that can already be regionalized.
+                        electricity_input = self.test_input_presence(new_act, 'electricity', 'technosphere')
+                        waste_input = self.test_input_presence(new_act, 'municipal solid waste', 'technosphere')
+                        heat_district_ng_input = self.test_input_presence(
+                            new_act, 'heat, district or industrial, natural gas', 'technosphere')
+                        heat_district_non_ng_input = self.test_input_presence(
+                            new_act, 'heat, district or industrial, other than natural gas', 'technosphere')
+                        heat_small_scale_non_ng_input = self.test_input_presence(
+                            new_act, 'heat, central or small-scale, other than natural gas', 'technosphere')
                         if global_default:
-                            water_values = self.change_water(new_act, exporter, region='GLO')
+                            water_input = self.test_input_presence(new_act, 'water', 'biosphere', region="GLO")
                         else:
-                            water_values = self.change_water(new_act, exporter, region='RoW')
-                        for water_type in water_values:
-                            new_water_exc = new_act.new_exchange(
-                                input=water_values[water_type]['key'],
-                                amount=water_values[water_type]['amount'],
-                                type='biosphere',
-                                name=bw2.Database(self.name_regionalized_biosphere_database).get(
-                                    water_values[water_type]['key'][1]).as_dict()['name'],
-                                flow=water_values[water_type]['key'][1])
-                            new_water_exc.save()
+                            water_input = self.test_input_presence(new_act, 'water', 'biosphere', region="RoW")
+
+                        if electricity_input:
+                            # spatialize electricity
+                            key, amount, name = self.change_electricity(new_act, exporter)
+                            new_elec_exc = new_act.new_exchange(input=key, amount=amount, type='technosphere', name=name)
+                            new_elec_exc.save()
+                        if waste_input:
+                            # spatialize waste
+                            key, amount = self.change_waste(new_act, exporter)
+                            new_waste_exc = new_act.new_exchange(input=key, amount=amount, type='technosphere',
+                                                                 name='municipal solid waste')
+                            new_waste_exc.save()
+                        if heat_district_ng_input:
+                            # spatialize heat
+                            heat_flow = 'heat, district or industrial, natural gas'
+                            distrib_heat = self.change_heat(new_act, exporter, heat_flow)
+                            for heat_flow in distrib_heat:
+                                new_heat_exc = new_act.new_exchange(input=heat_flow[0], amount=heat_flow[1],
+                                                                    type='technosphere', name=heat_flow)
+                                new_heat_exc.save()
+                        if heat_district_non_ng_input:
+                            # spatialize heat
+                            heat_flow = 'heat, district or industrial, other than natural gas'
+                            distrib_heat = self.change_heat(new_act, exporter, heat_flow)
+                            for heat_flow in distrib_heat:
+                                new_heat_exc = new_act.new_exchange(input=heat_flow[0], amount=heat_flow[1],
+                                                                    type='technosphere', name=heat_flow)
+                                new_heat_exc.save()
+                        if heat_small_scale_non_ng_input:
+                            # spatialize heat
+                            heat_flow = 'heat, central or small-scale, other than natural gas'
+                            distrib_heat = self.change_heat(new_act, exporter, heat_flow)
+                            for heat_flow in distrib_heat:
+                                new_heat_exc = new_act.new_exchange(input=heat_flow[0], amount=heat_flow[1],
+                                                                    type='technosphere', name=heat_flow)
+                                new_heat_exc.save()
+                        if water_input:
+                            if global_default:
+                                water_values = self.change_water(new_act, exporter, region='GLO')
+                            else:
+                                water_values = self.change_water(new_act, exporter, region='RoW')
+                            for water_type in water_values:
+                                new_water_exc = new_act.new_exchange(
+                                    input=water_values[water_type]['key'],
+                                    amount=water_values[water_type]['amount'],
+                                    type='biosphere',
+                                    name=bw2.Database(self.name_regionalized_biosphere_database).get(
+                                        water_values[water_type]['key'][1]).as_dict()['name'],
+                                    flow=water_values[water_type]['key'][1])
+                                new_water_exc.save()
+        except KeyboardInterrupt:
+            try:
+                self.logger.info("Seems like you have interrupted the construction of regioinvent. We will clean the "
+                                 "incomplete transactions and save your progress. You can continue to compile " +
+                                 self.regioinvent_database_name + " another time.")
+                [bw2.Database(self.regioinvent_database_name).get(i).delete() for i in self.ecoinvent_cursor.execute(
+                    f"""SELECT code FROM activitydataset WHERE product='{product}' AND 
+                                database='{self.regioinvent_database_name}'""").fetchall()]
+            except LockError:
+                self.logger.info("Deleting the incomplete transactions could not be done because the interuption "
+                                 "happened right during a transaction. The incomplete transactions will be cleaned "
+                                 "at the next run of " + self.regioinvent_database_name +".")
+                with open(pkg_resources.resource_filename(__name__, '/Data/to_delete_because_of_interruption.json'), 'w') as f:
+                    json.dump([product], f)
 
     def create_consumption_markets(self):
 
@@ -788,39 +857,49 @@ class Regioinvent:
 
     def test_input_presence(self, process, input_name, flow_type, region=None):
         if flow_type == 'technosphere':
-            return len([bw2.Database(self.new_regionalized_ecoinvent_database_name).get(i.input[1]) for i in
-                        process.exchanges() if input_name in i.as_dict()['name']]) != 0
+            # using for loops instead of list comprehensions allows breaking once it finds any input -> faster
+            for i in process.exchanges():
+                if input_name in i.as_dict()['name']:
+                    return True
+
         elif flow_type == 'biosphere':
-            for water_type in self.water_flows_in_ecoinvent:
-                try:
-                    if len([bw2.Database(self.name_regionalized_biosphere_database).get(i.input[1]) for i in
-                            process.exchanges() if (i.input[0] == self.name_regionalized_biosphere_database and
-                         i.as_dict()['name'].split(', ' + region)[0] == water_type)][0]):
-                        return True
-                except IndexError:
-                    pass
+            if input_name == 'water':
+                for water_type in self.water_flows_in_ecoinvent:
+                    for i in process.exchanges():
+                        if (i.input[0] == self.name_regionalized_biosphere_database and
+                                i.as_dict()['name'].split(', ' + region)[0] == water_type):
+                            return True
 
     def change_electricity(self, new_act, exporter):
         # limit: RoW associated with GLO instead of recalculating
         # limit: same for regions exporting (e.g., RAS)
         qty_of_electricity = sum(
             [i.as_dict()['amount'] for i in new_act.exchanges() if 'electricity' in i.as_dict()['name']])
-        type_of_electricity = [i.as_dict()['name'] for i in new_act.exchanges() if 'electricity' in i.as_dict()['name']][0]
-        if exporter != 'RoW':
-            key = bw2.Database(self.new_regionalized_ecoinvent_database_name).get(
-                self.ecoinvent_cursor.execute(f"""SELECT code FROM activitydataset WHERE 
+        for i in new_act.exchanges():
+            if 'electricity' in i.as_dict()['name']:
+                type_of_electricity = i.as_dict()['name']
+                break
+        if exporter != 'RoW' and exporter in self.electricity_geos:
+            code = (self.ecoinvent_cursor.execute(f"""SELECT code FROM activitydataset WHERE 
                  product='{type_of_electricity}' AND database='{self.new_regionalized_ecoinvent_database_name}' AND 
-                 name LIKE '%market%' AND name NOT LIKE '%generic%' AND location='{exporter}'""").fetchall()[0][0]).key
+                 name LIKE '%market%' AND name NOT LIKE '%generic%' AND 
+                 location='{exporter}'""").fetchall()[0][0])
+        elif (exporter != 'RoW' and exporter in self.country_to_ecoinvent_regions and
+              self.country_to_ecoinvent_regions[exporter] in self.electricity_geos):
+            code = (self.ecoinvent_cursor.execute(f"""SELECT code FROM activitydataset WHERE 
+                 product='{type_of_electricity}' AND database='{self.new_regionalized_ecoinvent_database_name}' AND 
+                 name LIKE '%market%' AND name NOT LIKE '%generic%' AND 
+                 location='{self.country_to_ecoinvent_regions[exporter]}'""").fetchall()[0][0])
         else:
             # if the exporter is RoW -> assign global electricity process
-            key = bw2.Database(self.new_regionalized_ecoinvent_database_name).get(
-                self.ecoinvent_cursor.execute(f"""SELECT code FROM activitydataset WHERE 
-                product='{type_of_electricity}' AND database='{self.new_regionalized_ecoinvent_database_name}' AND 
-                name LIKE '%market%' AND name NOT LIKE '%generic%' AND location='GLO'""").fetchall()[0][0]).key
+            code = (self.ecoinvent_cursor.execute(f"""SELECT code FROM activitydataset WHERE 
+                 product='{type_of_electricity}' AND database='{self.new_regionalized_ecoinvent_database_name}' AND 
+                 name LIKE '%market%' AND name NOT LIKE '%generic%' AND 
+                 location='GLO'""").fetchall()[0][0])
         # delete old flow(s) of electricity
         [i.delete() for i in new_act.exchanges() if 'electricity' in i.as_dict()['name']]
 
-        return key, qty_of_electricity, type_of_electricity
+        return (self.new_regionalized_ecoinvent_database_name, code), qty_of_electricity, type_of_electricity
 
     def change_heat(self, new_act, exporter, heat_flow):
         if heat_flow == 'heat, district or industrial, natural gas':
