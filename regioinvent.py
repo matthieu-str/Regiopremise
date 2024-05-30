@@ -10,6 +10,7 @@ date created: 06-04-24
 """
 
 import pandas as pd
+import numpy as np
 import json
 import pkg_resources
 import brightway2 as bw2
@@ -23,6 +24,7 @@ import collections
 import wurst
 import wurst.searching as ws
 import copy
+from tqdm import tqdm
 
 
 class Regioinvent:
@@ -50,6 +52,7 @@ class Regioinvent:
         self.ecoinvent_cursor = self.ecoinvent_conn.cursor()
         self.multiple_activities_per_product = []
         self.no_glo_region = []
+        self.assigned_random_geography = []
 
         with open(pkg_resources.resource_filename(__name__, '/Data/ecoinvent_to_HS.json'), 'r') as f:
             self.eco_to_hs_class = json.load(f)
@@ -75,6 +78,9 @@ class Regioinvent:
             self.convert_ecoinvent_geos = json.load(f)
         with open(pkg_resources.resource_filename(__name__, '/Data/COMTRADE_to_exiobase_geographies.json'), 'r') as f:
             self.convert_exiobase_geos = json.load(f)
+
+        self.created_geographies = dict.fromkeys(self.eco_to_hs_class.keys())
+        self.unit = dict.fromkeys(self.eco_to_hs_class.keys())
 
         self.water_flows_in_ecoinvent = ['Water', 'Water, cooling, unspecified natural origin',
                                          'Water, lake',
@@ -334,7 +340,8 @@ class Regioinvent:
 
     def first_order_regionalization(self):
 
-        for product in self.eco_to_hs_class:
+        print("Regionalizing main inputs of traded products of ecoinvent")
+        for product in tqdm(self.eco_to_hs_class, leave=True):
             cmd_export_data = self.export_data[self.export_data.cmdCode.isin([self.eco_to_hs_class[product]])].copy(
                 'deep')
             # calculate the average export volume for each country
@@ -348,6 +355,8 @@ class Regioinvent:
                 exporters.loc['RoW'] += remainder
             else:
                 exporters.loc['RoW'] = remainder
+
+            self.created_geographies[product] = [i for i in exporters.index]
 
             # select product
             filter_processes = ws.get_many(self.ei39_wurst, ws.equals("reference product", product),
@@ -392,6 +401,7 @@ class Regioinvent:
                                                     global_market_activity['database'], global_market_activity['code']),
                                                     'output': (global_market_activity['database'],
                                                                global_market_activity['code'])}]
+            self.unit[product] = global_market_activity['unit']
 
             def copy_process(product, region, export_country):
                 try:
@@ -435,15 +445,24 @@ class Regioinvent:
                 return regio_process
 
             for exporter in exporters.index:
+                # reset regio_process
+                regio_process = None
                 if exporter in available_geographies and exporter not in ['RoW']:
                     regio_process = copy_process(product, exporter, exporter)
-                elif (exporter in self.country_to_ecoinvent_regions and
-                      self.country_to_ecoinvent_regions[exporter] in available_geographies):
-                    regio_process = copy_process(product, self.country_to_ecoinvent_regions[exporter], exporter)
+                elif exporter in self.country_to_ecoinvent_regions and regio_process:
+                    for potential_region in self.country_to_ecoinvent_regions[exporter]:
+                        if potential_region in available_geographies:
+                            regio_process = copy_process(product, potential_region, exporter)
                 elif 'RoW' in available_geographies:
                     regio_process = copy_process(product, 'RoW', exporter)
                 elif 'GLO' in available_geographies:
                     regio_process = copy_process(product, 'GLO', exporter)
+                else:
+                    if available_geographies:
+                        # if not RoW/GLO processes, take the first available geography by default...
+                        regio_process = copy_process(product, available_geographies[0], exporter)
+                        self.assigned_random_geography.append([product, exporter])
+
                 if regio_process:
                     if self.test_input_presence(regio_process, 'electricity', 'technosphere',
                                                       extra='aluminium/electricity'):
@@ -534,12 +553,14 @@ class Regioinvent:
                             amount=cmd_consumption_data.loc[(importer, trading_partner), 'qty'],
                             type='technosphere', name=product)
                         new_trade_exc.save()
-                    elif trading_partner in self.country_to_ecoinvent_regions and self.country_to_ecoinvent_regions[
-                        trading_partner] in available_trading_partners:
-                        trading_partner_key = bw2.Database(self.regioinvent_database_name).get(self.ecoinvent_cursor.execute(
+                    elif trading_partner in self.country_to_ecoinvent_regions:
+                        for potential_region in self.country_to_ecoinvent_regions[trading_partner]:
+                            if potential_region in available_trading_partners:
+                                trading_partner_key = bw2.Database(self.regioinvent_database_name).get(
+                                    self.ecoinvent_cursor.execute(
                             f"""SELECT code FROM activitydataset WHERE product='{product}' AND 
                             database='{self.regioinvent_database_name}' AND name NOT LIKE '%consumption market%' AND 
-                            location='{self.country_to_ecoinvent_regions[trading_partner]}'""").fetchall()[0][0]).key
+                            location='{potential_region}'""").fetchall()[0][0]).key
                         new_trade_exc = new_import_data.new_exchange(
                             input=trading_partner_key,
                             amount=cmd_consumption_data.loc[(importer, trading_partner), 'qty'],
@@ -591,14 +612,15 @@ class Regioinvent:
                                 database='{self.regioinvent_database_name}' AND 
                                 name LIKE '%consumption market%' AND 
                                 location='{process.as_dict()['location']}'""").fetchall()[0][0]).key
-                        elif (process.as_dict()['location'] in self.country_to_ecoinvent_regions and
-                              self.country_to_ecoinvent_regions[process.as_dict()['location']] in available_geographies):
-                            new_exchange_key = bw2.Database(self.regioinvent_database_name).get(
-                                self.ecoinvent_cursor.execute(f"""SELECT code FROM activitydataset WHERE 
+                        elif process.as_dict()['location'] in self.country_to_ecoinvent_regions:
+                            for potential_region in self.country_to_ecoinvent_regions[process.as_dict()['location']]:
+                                if potential_region in available_geographies:
+                                    new_exchange_key = bw2.Database(self.regioinvent_database_name).get(
+                                        self.ecoinvent_cursor.execute(f"""SELECT code FROM activitydataset WHERE 
                                 product='{inputt.as_dict()['name']}' AND 
                                 database='{self.regioinvent_database_name}' AND 
                                 name LIKE '%consumption market%' AND 
-                                location='{self.country_to_ecoinvent_regions[process.as_dict()['location']]}'""").fetchall()[0][0]).key
+                                location='{potential_region}'""").fetchall()[0][0]).key
                         else:
                             new_exchange_key = bw2.Database(self.regioinvent_database_name).get(
                                 self.ecoinvent_cursor.execute(f"""SELECT code FROM activitydataset WHERE 
@@ -636,12 +658,14 @@ class Regioinvent:
                         'cobalt' not in exc['name'] and 'voltage' in exc['name']):
                     process['exchanges'].remove(exc)
 
+            electricity_region = None
             if export_country in self.electricity_geos:
                 electricity_region = export_country
-            elif (export_country != 'RoW' and export_country in self.country_to_ecoinvent_regions and
-                  self.country_to_ecoinvent_regions[export_country] in self.electricity_geos):
-                electricity_region = self.country_to_ecoinvent_regions[export_country]
-            else:
+            elif export_country != 'RoW' and export_country in self.country_to_ecoinvent_regions and not electricity_region:
+                for potential_region in self.country_to_ecoinvent_regions[export_country]:
+                    if potential_region in self.electricity_geos:
+                        electricity_region = potential_region
+            if not electricity_region:
                 electricity_region = 'GLO'
 
             if electricity_region in ['BR', 'CA', 'CN', 'GLO', 'IN', 'RAF', 'RAS', 'RER', 'RLA', 'RME', 'RNA', 'US']:
@@ -684,12 +708,14 @@ class Regioinvent:
                 if electricity_product_name == exc['product'] and 'aluminium' in exc['name']:
                     process['exchanges'].remove(exc)
 
+            electricity_region = None
             if export_country in self.electricity_aluminium_geos:
                 electricity_region = export_country
-            elif (export_country != 'RoW' and export_country in self.country_to_ecoinvent_regions and
-                  self.country_to_ecoinvent_regions[export_country] in self.electricity_aluminium_geos):
-                electricity_region = self.country_to_ecoinvent_regions[export_country]
-            else:
+            elif export_country != 'RoW' and export_country in self.country_to_ecoinvent_regions and not electricity_region:
+                for potential_region in self.country_to_ecoinvent_regions[export_country]:
+                    if potential_region in self.electricity_aluminium_geos:
+                        electricity_region = potential_region
+            if not electricity_region:
                 electricity_region = 'RoW'
 
             electricity_activity_name = 'market for ' + electricity_product_name
@@ -766,7 +792,8 @@ class Regioinvent:
 
         if export_country in self.waste_geos:
             waste_region = export_country
-        elif export_country in self.country_to_ecoinvent_regions and self.country_to_ecoinvent_regions[export_country] == "RER":
+        elif (export_country in self.country_to_ecoinvent_regions and
+              self.country_to_ecoinvent_regions[export_country][0] == "RER"):
             waste_region = 'Europe without Switzerland'
         else:
             waste_region = 'RoW'
@@ -820,11 +847,12 @@ class Regioinvent:
                         f"""SELECT data FROM activitydataset WHERE name='{water_type + ', ' + export_country}' AND 
                             database='{self.name_regionalized_biosphere_database}'""", self.ecoinvent_conn).data if
                                                                         pickle.loads(i)['categories'] == categories][0])
-                elif (export_country in self.country_to_ecoinvent_regions and
-                      self.country_to_ecoinvent_regions[export_country] in self.water_geos):
-                    water_key = (self.name_regionalized_biosphere_database, [pickle.loads(i)['code'] for i in pd.read_sql(
+                elif export_country in self.country_to_ecoinvent_regions:
+                    for potential_region in self.country_to_ecoinvent_regions[export_country]:
+                        if potential_region in self.water_geos:
+                            water_key = (self.name_regionalized_biosphere_database, [pickle.loads(i)['code'] for i in pd.read_sql(
                         f"""SELECT data FROM activitydataset WHERE name='{
-                        water_type + ', ' + self.country_to_ecoinvent_regions[export_country]}' AND 
+                        water_type + ', ' + potential_region}' AND 
                             database='{self.name_regionalized_biosphere_database}'""", self.ecoinvent_conn).data if
                                                                         pickle.loads(i)['categories'] == categories][0])
                 else:
@@ -849,9 +877,9 @@ class Regioinvent:
     def change_heat(self, process, export_country, heat_flow):
         if heat_flow == 'heat, district or industrial, natural gas':
             heat_process_countries = self.heat_district_ng
-        elif heat_flow == 'heat, district or industrial, other than natural gas':
+        if heat_flow == 'heat, district or industrial, other than natural gas':
             heat_process_countries = self.heat_district_non_ng
-        elif heat_flow == 'heat, central or small-scale, other than natural gas':
+        if heat_flow == 'heat, central or small-scale, other than natural gas':
             heat_process_countries = self.heat_small_scale_non_ng
 
         unit_name = list(set([i['unit'] for i in process['exchanges'] if heat_flow == i['product']]))
@@ -869,14 +897,16 @@ class Regioinvent:
         # CH is its own market
         if export_country == 'CH':
             region_heat = export_country
-        elif export_country in self.country_to_ecoinvent_regions and self.country_to_ecoinvent_regions[export_country] == 'RER':
+        elif (export_country in self.country_to_ecoinvent_regions and
+              self.country_to_ecoinvent_regions[export_country][0] == 'RER'):
             region_heat = "Europe without Switzerland"
         else:
             region_heat = "RoW"
 
         # check if the country has a national production heat process, if not take the region or RoW
         if export_country not in heat_process_countries:
-            if export_country in self.country_to_ecoinvent_regions and self.country_to_ecoinvent_regions[export_country] == 'RER':
+            if (export_country in self.country_to_ecoinvent_regions and
+                    self.country_to_ecoinvent_regions[export_country][0] == 'RER'):
                 export_country = "Europe without Switzerland"
             else:
                 export_country = "RoW"
@@ -1042,6 +1072,12 @@ class Regioinvent:
             self.import_data.loc[self.import_data.loc[:, 'reporterISO'] == self.import_data.loc[:, 'partnerISO']].index)
         # concatenate import and domestic data
         self.consumption_data = pd.concat([self.import_data, self.domestic_data.loc[:, self.import_data.columns]])
+        # get rid of infinite values
+        self.consumption_data.qty = self.consumption_data.qty.replace(np.inf, 0.0)
+
+        # save RAM
+        del self.import_data
+        del self.domestic_data
 
     def write_to_database(self):
         # only select processes of the newly created regioinvent database
@@ -1070,6 +1106,11 @@ class Regioinvent:
                 pass
 
         bw2.Database(self.regioinvent_database_name).write(regioinvent_data)
+
+    def remove_duplicates(self):
+
+        unique_ei39_wurst = {i['code']: i for i in self.ei39_wurst}
+        self.ei39_wurst = [v for k, v in unique_ei39_wurst.items()]
 
 
 def clean_up_dataframe(df):
