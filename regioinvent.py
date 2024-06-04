@@ -53,6 +53,8 @@ class Regioinvent:
         self.multiple_activities_per_product = []
         self.no_glo_region = []
         self.assigned_random_geography = []
+        self.regioinvent_in_wurst = []
+        self.regioinvent_in_dict = {}
 
         with open(pkg_resources.resource_filename(__name__, '/Data/ecoinvent_to_HS.json'), 'r') as f:
             self.eco_to_hs_class = json.load(f)
@@ -97,7 +99,9 @@ class Regioinvent:
         #     self.logger.info("Linking regionalized LCIA method to regionalized biosphere database...")
         #     self.link_regionalized_biosphere_to_regionalized_CFs()
 
-        self.ei39_wurst = wurst.extract_brightway2_databases(self.ecoinvent_database_name, add_identifiers=True)
+        self.logger.info("Extracting ecoinvent to wurst...")
+        self.ei_wurst = wurst.extract_brightway2_databases(self.ecoinvent_database_name, add_identifiers=True)
+        self.ei_in_dict = {(i['reference product'], i['location'], i['name']): i for i in self.ei_wurst}
 
     def create_regionalized_biosphere_flows(self):
 
@@ -340,7 +344,8 @@ class Regioinvent:
 
     def first_order_regionalization(self):
 
-        print("Regionalizing main inputs of traded products of ecoinvent")
+        self.logger.info("Regionalizing main inputs of traded products of ecoinvent...")
+
         for product in tqdm(self.eco_to_hs_class, leave=True):
             cmd_export_data = self.export_data[self.export_data.cmdCode.isin([self.eco_to_hs_class[product]])].copy(
                 'deep')
@@ -359,8 +364,10 @@ class Regioinvent:
             self.created_geographies[product] = [i for i in exporters.index]
 
             # select product
-            filter_processes = ws.get_many(self.ei39_wurst, ws.equals("reference product", product),
-                                           ws.exclude(ws.contains("name", "market")),
+            filter_processes = ws.get_many(self.ei_wurst, ws.equals("reference product", product),
+                                           ws.exclude(ws.contains("name", "market for")),
+                                           ws.exclude(ws.contains("name", "market group for")),
+                                           ws.exclude(ws.contains("name", "generic market")),
                                            ws.exclude(ws.contains("name", "import from")))
 
             available_geographies = []
@@ -405,20 +412,17 @@ class Regioinvent:
 
             def copy_process(product, region, export_country):
                 try:
-                    process = ws.get_one(self.ei39_wurst,
+                    process = ws.get_one(self.ei_wurst,
                                          ws.equals("reference product", product),
                                          ws.equals("location", region),
                                          ws.equals("database", self.ecoinvent_database_name),
-                                         ws.exclude(ws.contains("name", "market")))
+                                         ws.exclude(ws.contains("name", "market for")),
+                                         ws.exclude(ws.contains("name", "market group for")),
+                                         ws.exclude(ws.contains("name", "generic market")),
+                                         ws.exclude(ws.contains("name", "import from")))
                 except wurst.errors.MultipleResults:
                     self.multiple_activities_per_product.append(product)
                     return
-                except wurst.errors.NoResults:
-                    if region == 'GLO':
-                        self.no_glo_region.append(product)
-                        return
-                    else:
-                        print('aie, ' + product)
                 regio_process = copy.deepcopy(process)
                 # change location
                 regio_process['location'] = export_country
@@ -469,7 +473,7 @@ class Regioinvent:
                         regio_process = self.change_aluminium_electricity(regio_process, exporter)
                     elif self.test_input_presence(regio_process, 'electricity', 'technosphere',
                                                         extra='cobalt/electricity'):
-                        regio_process = self.change_cobalt_electricity(regio_process, exporter)
+                        regio_process = self.change_cobalt_electricity(regio_process)
                     elif self.test_input_presence(regio_process, 'electricity', 'technosphere', extra='voltage'):
                         regio_process = self.change_electricity(regio_process, exporter)
                     if self.test_input_presence(regio_process, 'municipal solid waste', 'technosphere'):
@@ -492,8 +496,9 @@ class Regioinvent:
                                                                'heat, central or small-scale, other than natural gas')
 
                 if regio_process:
-                    self.ei39_wurst.append(regio_process)
-            self.ei39_wurst.append(global_market_activity)
+                    self.regioinvent_in_wurst.append(regio_process)
+
+            self.regioinvent_in_wurst.append(global_market_activity)
 
         # save RAM
         del self.export_data
@@ -502,139 +507,114 @@ class Regioinvent:
 
         self.logger.info("Creating consumption markets...")
 
-        for product in self.eco_to_hs_class:
-            cmd_consumption_data = self.consumption_data[self.consumption_data.cmdCode == self.eco_to_hs_class[product]].copy('deep')
-            # calculate the average import volume for each country
-            cmd_consumption_data = cmd_consumption_data.groupby(['reporterISO', 'partnerISO']).agg({'qty': 'mean'})
-            # change to relative
-            importers = (cmd_consumption_data.groupby(level=0).sum() / cmd_consumption_data.sum().sum()).sort_values(
-                by='qty', ascending=False)
-            # only keep importers till the 99% of total imports
-            limit = importers.index.get_loc(importers[importers.cumsum() > 0.99].dropna().index[0]) + 1
-            # aggregate the rest
-            remainder = cmd_consumption_data.loc[importers.index[limit:]].groupby(level=1).sum()
-            cmd_consumption_data = cmd_consumption_data.loc[importers.index[:limit]]
-            # assign the aggregate to RoW
-            cmd_consumption_data = pd.concat([cmd_consumption_data, pd.concat([remainder], keys=['RoW'])])
-            cmd_consumption_data.index = pd.MultiIndex.from_tuples([i for i in cmd_consumption_data.index])
-            cmd_consumption_data = cmd_consumption_data.sort_index()
-            # for each importer, calculate the relative shares of each country it is importing from
-            for importer in cmd_consumption_data.index.levels[0]:
-                cmd_consumption_data.loc[importer, 'qty'] = (
-                        cmd_consumption_data.loc[importer, 'qty'] / cmd_consumption_data.loc[importer, 'qty'].sum()).values
-            # we need to add the aggregate to potentially already existing RoW exchanges
-            cmd_consumption_data = pd.concat([cmd_consumption_data.drop('RoW'),
-                                         pd.concat([cmd_consumption_data.loc['RoW'].groupby(level=0).sum()], keys=['RoW'])])
-            # create the consumption markets
-            for importer in cmd_consumption_data.index.levels[0]:
-                new_import_data = bw2.Database(self.regioinvent_database_name).new_activity(uuid.uuid4().hex)
-                new_import_data['name'] = 'consumption market for ' + product
-                new_import_data['reference product'] = product
-                new_import_data['location'] = importer
-                new_import_data['type'] = 'process'
-                new_import_data['unit'] = 'kilogram'
-                new_import_data.save()
-                # create the production flow
-                new_exc = new_import_data.new_exchange(input=new_import_data.key, amount=1, type='production')
-                new_exc.save()
+        self.regioinvent_in_dict = {(i['reference product'], i['location']): i for i in self.regioinvent_in_wurst}
 
-                available_trading_partners = [i[0] for i in self.ecoinvent_cursor.execute(
-                    f"""SELECT location FROM activitydataset WHERE product='{product}' AND 
-                    database='{self.regioinvent_database_name}' AND name NOT LIKE '%consumption market%'""").fetchall()]
+        for product in tqdm(self.eco_to_hs_class, leave=True):
+            if product not in self.multiple_activities_per_product:
+                cmd_consumption_data = self.consumption_data[
+                    self.consumption_data.cmdCode == self.eco_to_hs_class[product]].copy('deep')
+                # calculate the average import volume for each country
+                cmd_consumption_data = cmd_consumption_data.groupby(['reporterISO', 'partnerISO']).agg({'qty': 'mean'})
+                # change to relative
+                importers = (cmd_consumption_data.groupby(level=0).sum() /
+                             cmd_consumption_data.sum().sum()).sort_values(by='qty', ascending=False)
+                # only keep importers till the 99% of total imports
+                limit = importers.index.get_loc(importers[importers.cumsum() > 0.99].dropna().index[0]) + 1
+                # aggregate the rest
+                remainder = cmd_consumption_data.loc[importers.index[limit:]].groupby(level=1).sum()
+                cmd_consumption_data = cmd_consumption_data.loc[importers.index[:limit]]
+                # assign the aggregate to RoW
+                cmd_consumption_data = pd.concat([cmd_consumption_data, pd.concat([remainder], keys=['RoW'])])
+                cmd_consumption_data.index = pd.MultiIndex.from_tuples([i for i in cmd_consumption_data.index])
+                cmd_consumption_data = cmd_consumption_data.sort_index()
+                # for each importer, calculate the relative shares of each country it is importing from
+                for importer in cmd_consumption_data.index.levels[0]:
+                    cmd_consumption_data.loc[importer, 'qty'] = (cmd_consumption_data.loc[importer, 'qty'] /
+                                                                 cmd_consumption_data.loc[importer, 'qty'].sum()).values
+                    # we need to add the aggregate to potentially already existing RoW exchanges
+                    cmd_consumption_data = pd.concat([cmd_consumption_data.drop('RoW', level=0),
+                                                      pd.concat(
+                                                          [cmd_consumption_data.loc['RoW'].groupby(level=0).sum()],
+                                                          keys=['RoW'])])
+                    cmd_consumption_data = cmd_consumption_data.fillna(0)
 
-                for trading_partner in cmd_consumption_data.loc[importer].index:
-                    if trading_partner in available_trading_partners:
-                        trading_partner_key = bw2.Database(self.regioinvent_database_name).get(self.ecoinvent_cursor.execute(
-                            f"""SELECT code FROM activitydataset WHERE product='{product}' AND 
-                            database='{self.regioinvent_database_name}' AND name NOT LIKE '%consumption market%' AND 
-                            location='{trading_partner}'""").fetchall()[0][0]).key
-                        new_trade_exc = new_import_data.new_exchange(
-                            input=trading_partner_key,
-                            amount=cmd_consumption_data.loc[(importer, trading_partner), 'qty'],
-                            type='technosphere', name=product)
-                        new_trade_exc.save()
-                    elif trading_partner in self.country_to_ecoinvent_regions:
-                        for potential_region in self.country_to_ecoinvent_regions[trading_partner]:
-                            if potential_region in available_trading_partners:
-                                trading_partner_key = bw2.Database(self.regioinvent_database_name).get(
-                                    self.ecoinvent_cursor.execute(
-                            f"""SELECT code FROM activitydataset WHERE product='{product}' AND 
-                            database='{self.regioinvent_database_name}' AND name NOT LIKE '%consumption market%' AND 
-                            location='{potential_region}'""").fetchall()[0][0]).key
-                        new_trade_exc = new_import_data.new_exchange(
-                            input=trading_partner_key,
-                            amount=cmd_consumption_data.loc[(importer, trading_partner), 'qty'],
-                            type='technosphere', name=product)
-                        new_trade_exc.save()
-                    else:
-                        trading_partner_key = bw2.Database(self.regioinvent_database_name).get(self.ecoinvent_cursor.execute(
-                            f"""SELECT code FROM activitydataset WHERE product='{product}' AND 
-                            database='{self.regioinvent_database_name}' AND name NOT LIKE '%consumption market%' AND 
-                            location='RoW'""").fetchall()[0][0]).key
-                        new_trade_exc = new_import_data.new_exchange(
-                            input=trading_partner_key,
-                            amount=cmd_consumption_data.loc[(importer, trading_partner), 'qty'],
-                            type='technosphere', name=product)
-                        new_trade_exc.save()
+                    new_import_data = {
+                        'name': 'consumption market for ' + product,
+                        'reference product': product,
+                        'location': importer,
+                        'type': 'process',
+                        'unit': self.unit[product],
+                        'code': uuid.uuid4().hex,
+                        'comment': 'blablabla',
+                        'database': self.regioinvent_database_name,
+                        'exchanges': []
+                    }
 
-                # check for duplicate input codes with different values (coming from RoW)
-                duplicates = [item for item, count in collections.Counter(
-                    [i.input['code'] for i in new_import_data.exchanges()]).items() if count > 1]
-                # aggregate duplicates in one flow
-                for duplicate in duplicates:
-                    total = sum([i.amount for i in new_import_data.exchanges() if i.input['code'] == duplicate])
-                    name = [i.input['name'] for i in new_import_data.exchanges() if i.input['code'] == duplicate][0]
-                    [i.delete() for i in new_import_data.exchanges() if i.input['code'] == duplicate]
-                    new_exc = new_import_data.new_exchange(input=(self.regioinvent_database_name, duplicate),
-                                                           amount=total, name=name, type='technosphere')
-                    new_exc.save()
+                    new_import_data['exchanges'].append({'amount': 1,
+                                                         'type': 'production',
+                                                         'input': (self.regioinvent_database_name, new_import_data['code'])})
+                    available_trading_partners = self.created_geographies[product]
+
+                    for trading_partner in cmd_consumption_data.loc[importer].index:
+                        if trading_partner in available_trading_partners:
+                            new_import_data['exchanges'].append({
+                                'amount': cmd_consumption_data.loc[(importer, trading_partner), 'qty'],
+                                'type': 'technosphere',
+                                'input': (self.regioinvent_database_name,
+                                          self.regioinvent_in_dict[(product, trading_partner)]['code']),
+                                'name': product
+                            })
+                        else:
+                            new_import_data['exchanges'].append({
+                                'amount': cmd_consumption_data.loc[(importer, trading_partner), 'qty'],
+                                'type': 'technosphere',
+                                'input': (self.regioinvent_database_name,
+                                          self.regioinvent_in_dict[(product, 'RoW')]['code']),
+                                'name': product
+                            })
+
+                    # check for duplicate input codes with different values (coming from RoW)
+                    duplicates = [item for item, count in
+                                  collections.Counter([i['input'] for i in new_import_data['exchanges']]).items() if
+                                  count > 1]
+                    # aggregate duplicates in one flow
+                    for duplicate in duplicates:
+                        total = sum([i['amount'] for i in new_import_data['exchanges'] if i['input'] == duplicate])
+                        new_import_data['exchanges'] = [i for i in new_import_data['exchanges'] if
+                                                        i['input'] != duplicate] + [
+                                                           {'amount': total, 'name': product, 'type': 'technosphere',
+                                                            'input': duplicate}]
+
+                    self.regioinvent_in_wurst.append(new_import_data)
 
     def second_order_regionalization(self):
 
         self.logger.info("Performing second order regionalization...")
 
-        for process in bw2.Database(self.regioinvent_database_name):
-            for inputt in process.technosphere():
-                # if it's an ecoinvent input
-                if inputt.as_dict()['input'][0] == self.new_regionalized_ecoinvent_database_name:
-                    # check if we regionalized the commodity
-                    if inputt.as_dict()['name'] in self.eco_to_hs_class.keys():
-                        exchange_amount = sum([i.amount for i in process.technosphere() if
-                                               i.as_dict()['name'] == inputt.as_dict()['name']])
-                        available_geographies = [i[0] for i in self.ecoinvent_cursor.execute(
-                            f"""SELECT location FROM activitydataset WHERE product='{inputt.as_dict()['name']}' AND 
-                            database='{self.regioinvent_database_name}' AND 
-                            name LIKE '%consumption market%'""").fetchall()]
-                        if process.as_dict()['location'] in available_geographies:
-                            new_exchange_key = bw2.Database(self.regioinvent_database_name).get(
-                                self.ecoinvent_cursor.execute(f"""SELECT code FROM activitydataset WHERE 
-                                product='{inputt.as_dict()['name']}' AND 
-                                database='{self.regioinvent_database_name}' AND 
-                                name LIKE '%consumption market%' AND 
-                                location='{process.as_dict()['location']}'""").fetchall()[0][0]).key
-                        elif process.as_dict()['location'] in self.country_to_ecoinvent_regions:
-                            for potential_region in self.country_to_ecoinvent_regions[process.as_dict()['location']]:
-                                if potential_region in available_geographies:
-                                    new_exchange_key = bw2.Database(self.regioinvent_database_name).get(
-                                        self.ecoinvent_cursor.execute(f"""SELECT code FROM activitydataset WHERE 
-                                product='{inputt.as_dict()['name']}' AND 
-                                database='{self.regioinvent_database_name}' AND 
-                                name LIKE '%consumption market%' AND 
-                                location='{potential_region}'""").fetchall()[0][0]).key
+        consumption_markets_data = {(i['name'], i['location']): i for i in self.regioinvent_in_wurst if
+                                    'consumption market' in i['name']}
+
+        for process in self.regioinvent_in_wurst:
+            if 'consumption market' not in process['name'] and 'production market' not in process['name']:
+                for exc in process['exchanges']:
+                    if (exc['product'] in self.eco_to_hs_class.keys() and exc['type'] == 'technosphere' and
+                            exc['product'] not in self.multiple_activities_per_product):
+                        exc['name'] = 'consumption market for ' + exc['product']
+                        exc['location'] = process['location']
+                        if ('consumption market for ' + exc['product'],
+                            process['location']) in consumption_markets_data.keys():
+                            exc['database'] = (consumption_markets_data[('consumption market for ' + exc['product'],
+                                                                         process['location'])]['database'])
+                            exc['code'] = (consumption_markets_data[('consumption market for ' + exc['product'],
+                                                                     process['location'])]['code'])
                         else:
-                            new_exchange_key = bw2.Database(self.regioinvent_database_name).get(
-                                self.ecoinvent_cursor.execute(f"""SELECT code FROM activitydataset WHERE 
-                                product='{inputt.as_dict()['name']}' AND 
-                                database='{self.regioinvent_database_name}' AND 
-                                name LIKE '%consumption market%' AND 
-                                location='RoW'""").fetchall()[0][0]).key
+                            exc['database'] = (consumption_markets_data[('consumption market for ' +
+                                                                         exc['product'], 'RoW')]['database'])
+                            exc['code'] = (consumption_markets_data[('consumption market for ' +
+                                                                    exc['product'], 'RoW')]['code'])
+                        exc['input'] = (exc['database'], exc['code'])
 
-                        [i.delete() for i in process.technosphere() if i.as_dict()['name'] == inputt.as_dict()['name']]
-                        new_exc = process.new_exchange(input=new_exchange_key, amount=exchange_amount,
-                                                       type='technosphere', name=inputt.as_dict()['name'])
-                        new_exc.save()
-
-        self.logger.info("Finished...")
+        self.logger.info("Finished, you can now write the database...")
 
     # ==================================================================================================================
     # -------------------------------------------Supporting functions---------------------------------------------------
@@ -673,9 +653,9 @@ class Regioinvent:
             else:
                 electricity_activity_name = 'market for ' + electricity_product_name
 
-            electricity_code = ws.get_one(self.ei39_wurst, ws.equals('reference product', electricity_product_name),
-                                          ws.equals('name', electricity_activity_name),
-                                          ws.equals('location', electricity_region))['code']
+            electricity_code = self.ei_in_dict[(electricity_product_name,
+                                                electricity_region,
+                                                electricity_activity_name)]['code']
 
             # create the regionalized flow for electricity
             process['exchanges'].append({"amount": qty_of_electricity,
@@ -720,9 +700,9 @@ class Regioinvent:
 
             electricity_activity_name = 'market for ' + electricity_product_name
 
-            electricity_code = ws.get_one(self.ei39_wurst, ws.equals('reference product', electricity_product_name),
-                                          ws.equals('name', electricity_activity_name),
-                                          ws.equals('location', electricity_region))['code']
+            electricity_code = self.ei_in_dict[(electricity_product_name,
+                                                electricity_region,
+                                                electricity_activity_name)]['code']
 
             # create the regionalized flow for electricity
             process['exchanges'].append({"amount": qty_of_electricity,
@@ -737,7 +717,7 @@ class Regioinvent:
 
         return process
 
-    def change_cobalt_electricity(self, process, export_country):
+    def change_cobalt_electricity(self, process):
         # identify electricity related exchanges
         electricity_product_names = list(set([i['product'] for i in process['exchanges'] if
                                               'electricity' in i['name'] and 'cobalt' in i['name']]))
@@ -760,9 +740,9 @@ class Regioinvent:
 
             electricity_activity_name = 'market for ' + electricity_product_name
 
-            electricity_code = ws.get_one(self.ei39_wurst, ws.equals('reference product', electricity_product_name),
-                                          ws.equals('name', electricity_activity_name),
-                                          ws.equals('location', electricity_region))['code']
+            electricity_code = self.ei_in_dict[(electricity_product_name,
+                                                electricity_region,
+                                                electricity_activity_name)]['code']
 
             # create the regionalized flow for electricity
             process['exchanges'].append({"amount": qty_of_electricity,
@@ -803,9 +783,9 @@ class Regioinvent:
         else:
             waste_activity_name = 'market for ' + waste_product_name
 
-        waste_code = ws.get_one(self.ei39_wurst, ws.equals('reference product', waste_product_name),
-                                ws.equals('name', waste_activity_name),
-                                ws.equals('location', waste_region))['code']
+        waste_code = self.ei_in_dict[(waste_product_name,
+                                      waste_region,
+                                      waste_activity_name)]['code']
 
         # create the regionalized flow for waste
         process['exchanges'].append({"amount": qty_of_waste,
@@ -912,7 +892,7 @@ class Regioinvent:
                 export_country = "RoW"
 
         # select region heat market process
-        region_heat_process = ws.get_many(self.ei39_wurst,
+        region_heat_process = ws.get_many(self.ei_wurst,
                                           ws.equals("reference product", heat_flow),
                                           ws.equals("location", region_heat),
                                           ws.equals("database", self.ecoinvent_database_name),
@@ -931,10 +911,6 @@ class Regioinvent:
 
         # add regionalized exchange of heat
         for heat_exc in heat_exchanges.keys():
-            ds = ws.get_one(self.ei39_wurst, ws.equals("name", heat_exc),
-                            ws.equals("reference product", heat_flow),
-                            ws.equals("location", export_country),
-                            ws.equals("database", self.ecoinvent_database_name))
 
             process['exchanges'].append({"amount": heat_exchanges[heat_exc],
                                            "product": heat_flow,
@@ -943,7 +919,8 @@ class Regioinvent:
                                            "unit": unit_name,
                                            "database": self.regioinvent_database_name,
                                            "type": "technosphere",
-                                           "input": (ds['database'], ds['code']),
+                                           "input": (self.ei_in_dict[(heat_flow, export_country, heat_exc)]['database'],
+                                                     self.ei_in_dict[(heat_flow, export_country, heat_exc)]['code']),
                                            "output": (process['database'], process['code'])})
 
         return process
@@ -968,7 +945,10 @@ class Regioinvent:
                     return True
 
     def format_export_data(self):
-        self.export_data = pd.read_sql('SELECT * FROM "Export data"', con=self.trade_conn)
+
+        self.logger.info("Formatting trade export data...")
+
+        self.export_data = pd.read_sql('SELECT * FROM "Export_data"', con=self.trade_conn)
         # only keep total export values (no need for destination detail)
         self.export_data = self.export_data[self.export_data.partnerISO == 'W00']
         # check if AtlQty is defined whenever Qty is empty. If it is, then use that value.
@@ -1031,7 +1011,10 @@ class Regioinvent:
         self.domestic_data.partnerISO = self.domestic_data.reporterISO
 
     def format_import_data(self):
-        self.import_data = pd.read_sql('SELECT * FROM "Import data"', con=self.trade_conn)
+
+        self.logger.info("Formatting trade import data...")
+
+        self.import_data = pd.read_sql('SELECT * FROM "Import_data"', con=self.trade_conn)
         # remove trade with "World"
         self.import_data = self.import_data.drop(self.import_data[self.import_data.partnerISO == 'W00'].index)
         # go from ISO3 codes to ISO2 codes
@@ -1080,16 +1063,8 @@ class Regioinvent:
         del self.domestic_data
 
     def write_to_database(self):
-        # only select processes of the newly created regioinvent database
-        regioinvent_filter = ws.get_many(self.ei39_wurst, ws.equals("database", self.regioinvent_database_name))
-
-        regioinvent = []
-        for ds in regioinvent_filter:
-            regioinvent.append(ds)
-
-        # transform into dictionary to import through brightway
-        # (importing through wurst requires to change the database name or smth, not what we want)
-        regioinvent_data = {(i['database'], i['code']): i for i in regioinvent}
+        # change to bw2 structure
+        regioinvent_data = {(i['database'], i['code']): i for i in self.regioinvent_in_wurst}
 
         # recreate inputs in edges (exchanges)
         for pr in regioinvent_data:
@@ -1098,7 +1073,7 @@ class Regioinvent:
                     exc['input']
                 except KeyError:
                     exc['input'] = (exc['database'], exc['code'])
-        # wurst creates empty categories for activites, this creates an issue when you try to write teh bw2 database
+        # wurst creates empty categories for activities, this creates an issue when you try to write teh bw2 database
         for pr in regioinvent_data:
             try:
                 del regioinvent_data[pr]['categories']
@@ -1109,8 +1084,8 @@ class Regioinvent:
 
     def remove_duplicates(self):
 
-        unique_ei39_wurst = {i['code']: i for i in self.ei39_wurst}
-        self.ei39_wurst = [v for k, v in unique_ei39_wurst.items()]
+        unique_ei_wurst = {i['code']: i for i in self.ei_wurst}
+        self.ei_wurst = [v for k, v in unique_ei_wurst.items()]
 
 
 def clean_up_dataframe(df):
