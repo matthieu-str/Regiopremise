@@ -1,0 +1,13 @@
+brightway2==2.4.4
+collections
+copy
+json
+logging
+numpy
+pandas
+pickle
+pkg_resources
+sqlite3
+tqdm
+uuid
+wurst>=0.4
