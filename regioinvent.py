@@ -278,6 +278,12 @@ class Regioinvent:
                 del ei_regio_bio_data[pr]['categories']
             except KeyError:
                 pass
+        # same with parameters
+        for pr in ei_regio_bio_data:
+            try:
+                del ei_regio_bio_data[pr]['parameters']
+            except KeyError:
+                pass
 
         bw2.Database(self.name_ei_with_regionalized_biosphere).write(ei_regio_bio_data)
 
