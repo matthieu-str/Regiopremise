@@ -4,7 +4,7 @@ copy
 json
 logging
 numpy
-pandas
+pandas==2.1.4
 pickle
 pkg_resources
 sqlite3

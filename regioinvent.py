@@ -26,13 +26,15 @@ from tqdm import tqdm
 
 
 class Regioinvent:
-    def __init__(self, trade_database_path, regioinvent_database_name, bw_project_name, ecoinvent_database_name):
+    def __init__(self, trade_database_path, regioinvent_database_name, bw_project_name, ecoinvent_database_name,
+                 regionalized_elementary_flows=True):
         """
         :param trade_database_path: [str] the path to the trade database, the latter should be downloaded from Zenodo:
                                         https://doi.org/...
         :param regioinvent_database_name: [str] the name to be given to the created regionalized ecoinvent database
         :param bw_project_name: [str] the name of a brightway2 project containing an ecoinvent database
         :param ecoinvent_database_name: [str] the name of the ecoinvent database within the brightway2 project
+        :param regionalized_elementary_flows: [boolean] should elementary flows be regionalized or not?
         """
 
         # set up logging tool
@@ -52,8 +54,9 @@ class Regioinvent:
         # set up necessary variables
         self.regioinvent_database_name = regioinvent_database_name
         self.ecoinvent_database_name = ecoinvent_database_name
-        self.new_regionalized_ecoinvent_database_name = ecoinvent_database_name + ' biosphere flows regionalized'
+        self.name_ei_with_regionalized_biosphere = ecoinvent_database_name + ' with regionalized biosphere flows'
         self.name_regionalized_biosphere_database = 'biosphere3_regionalized_flows'
+        self.regio_bio = regionalized_elementary_flows
         self.trade_conn = sqlite3.connect(trade_database_path)
         self.ecoinvent_conn = sqlite3.connect(bw2.Database(self.regioinvent_database_name).filepath_processed().split(
             '\\processed\\')[0] + '\\lci\\databases.db')
@@ -92,23 +95,82 @@ class Regioinvent:
         self.distribution_technologies = {}
         self.created_geographies = dict.fromkeys(self.eco_to_hs_class.keys())
         self.unit = dict.fromkeys(self.eco_to_hs_class.keys())
-        self.water_flows_in_ecoinvent = ['Water', 'Water, cooling, unspecified natural origin',
-                                         'Water, lake',
-                                         'Water, river',
-                                         'Water, turbine use, unspecified natural origin',
-                                         'Water, unspecified natural origin',
-                                         'Water, well, in ground']
+        self.base_iw_water_flows = ['Water',
+                                    'Water, cooling, unspecified natural origin',
+                                    'Water, lake',
+                                    'Water, river',
+                                    'Water, turbine use, unspecified natural origin',
+                                    'Water, unspecified natural origin',
+                                    'Water, well, in ground']
+        self.base_iw_land_flows = ['Occupation, agriculture, mosaic (agroforestry)',
+                                   'Occupation, annual crops',
+                                   'Occupation, artificial areas',
+                                   'Occupation, forest, used',
+                                   'Occupation, forest/grassland, not used',
+                                   'Occupation, pasture/meadow',
+                                   'Occupation, permanent crops',
+                                   'Occupation, secondary vegetation',
+                                   'Occupation, unspecified',
+                                   'Occupation, agriculture, mosaic (agroforestry)',
+                                   'Transformation, from annual crops',
+                                   'Transformation, from artificial areas',
+                                   'Transformation, from forest, used',
+                                   'Transformation, from forest/grassland, not used',
+                                   'Transformation, from pasture/meadow',
+                                   'Transformation, from permanent crops',
+                                   'Transformation, from secondary vegetation',
+                                   'Transformation, from unspecified',
+                                   'Transformation, to agriculture, mosaic (agroforestry)',
+                                   'Transformation, to annual crops',
+                                   'Transformation, to artificial areas',
+                                   'Transformation, to forest, used',
+                                   'Transformation, to forest/grassland, not used',
+                                   'Transformation, to pasture/meadow',
+                                   'Transformation, to permanent crops',
+                                   'Transformation, to secondary vegetation',
+                                   'Transformation, to unspecified']
+        self.base_iw_acid_eutro_flows = ['Ammonia',
+                                         'Ammonia, as N',
+                                         'Ammonium carbonate',
+                                         'Ammonium nitrate',
+                                         'Ammonium, ion',
+                                         'Dinitrogen monoxide',
+                                         'Kjeldahl-N',
+                                         'Nitrate',
+                                         'Nitric acid',
+                                         'Nitric oxide',
+                                         'Nitrite',
+                                         'Nitrogen dioxide',
+                                         'Nitrogen oxides',
+                                         'Nitrogen',
+                                         'Nitrogen, organic bound',
+                                         'Nitrogen, total',
+                                         'Sulfate',
+                                         'Sulfur dioxide',
+                                         'Sulfur trioxide',
+                                         'Sulfuric acid',
+                                         'BOD5, Biological Oxygen Demand',
+                                         'COD, Chemical Oxygen Demand',
+                                         'Phosphate',
+                                         'Phosphoric acid',
+                                         'Phosphorus compounds, unspecified',
+                                         'Phosphorus pentoxide',
+                                         'Phosphorus',
+                                         'Phosphorus, total']
 
-        # if self.name_regionalized_biosphere_database not in bw2.databases:
-        #     self.logger.info("Creating regionalized biosphere flows...")
-        #     self.create_regionalized_biosphere_flows()
-
-        # if 'IMPACT World+ Damage 2.0.1_regionalized' not in [i[0] for i in list(bw2.methods)]:
-        #     self.logger.info("Linking regionalized LCIA method to regionalized biosphere database...")
-        #     self.link_regionalized_biosphere_to_regionalized_CFs()
+        if self.regio_bio:
+            if self.name_regionalized_biosphere_database not in bw2.databases:
+                self.logger.info("Creating regionalized biosphere flows...")
+                self.create_regionalized_biosphere_flows()
+            if 'IMPACT World+ Damage 2.0.1_regionalized' not in [i[0] for i in list(bw2.methods)]:
+                self.logger.info("Importing regionalized LCIA method...")
+                self.importing_impact_world_plus()
 
         self.logger.info("Extracting ecoinvent to wurst...")
         self.ei_wurst = wurst.extract_brightway2_databases(self.ecoinvent_database_name, add_identifiers=True)
+        if self.regio_bio:
+            if self.name_ei_with_regionalized_biosphere not in bw2.databases:
+                self.create_ecoinvent_with_regionalized_biosphere_flows()
         self.ei_in_dict = {(i['reference product'], i['location'], i['name']): i for i in self.ei_wurst}
 
     def create_regionalized_biosphere_flows(self):
@@ -116,70 +178,18 @@ class Regioinvent:
         Function creates a regionalized version of the biosphere3 database of a brightway2 project
         """
 
-        locations_for_water_flows = []
-        for act in [i for i in bw2.Database(self.ecoinvent_database_name)]:
-            for exc in [i for i in act.biosphere()]:
-                if 'name' in exc.as_dict():
-                    if exc.as_dict()['name'] in self.water_flows_in_ecoinvent:
-                        if act.as_dict()['location'] not in locations_for_water_flows:
-                            locations_for_water_flows.append(act.as_dict()['location'])
+        with open(pkg_resources.resource_filename(__name__, '/Data/regionalized_biosphere_database.pickle'), 'rb') as f:
+            regionalized_biosphere = pickle.load(f)
 
-        water_flows_to_create = []
-        for water_flow_type in self.water_flows_in_ecoinvent:
-            for location in locations_for_water_flows:
-                water_flows_to_create.append(', '.join([water_flow_type, location]))
+        bw2.Database(self.name_regionalized_biosphere_database).write(regionalized_biosphere)
 
-        biosphere_data = {}
-        for water_flow in water_flows_to_create:
-            for location in locations_for_water_flows:
-                if len(water_flow.split(', ' + location)) > 1 and water_flow.split(', ' + location)[1] == '':
-                    if ','.join(water_flow.split(', ' + location)[:-1]) != 'Water':
-                        # unique identifier
-                        unique_id = uuid.uuid4().hex
-                        # format data into brightway-readable format
-                        biosphere_data[(self.name_regionalized_biosphere_database, unique_id)] = {
-                            "name": water_flow,
-                            "unit": 'cubic meter',
-                            "type": 'emission',
-                            "categories": ('natural resource', 'in water'),
-                            "code": unique_id}
-                        if ','.join(water_flow.split(', ' + location)[:-1]) == 'Water, unspecified natural origin':
-                            unique_id = uuid.uuid4().hex
-                            biosphere_data[(self.name_regionalized_biosphere_database, unique_id)] = {
-                                "name": water_flow,
-                                "unit": 'cubic meter',
-                                "type": 'emission',
-                                "categories": ('natural resource', 'in ground'),
-                                "code": unique_id}
-                            unique_id = uuid.uuid4().hex
-                            biosphere_data[(self.name_regionalized_biosphere_database, unique_id)] = {
-                                "name": water_flow,
-                                "unit": 'cubic meter',
-                                "type": 'emission',
-                                "categories": ('natural resource', 'fossil well'),
-                                "code": unique_id}
-                    else:
-                        for subcomp in ['surface water', 'ground-', 'ground-, long-term', 'fossil well']:
-                            # unique identifier
-                            unique_id = uuid.uuid4().hex
-                            # format data into brightway-readable format
-                            biosphere_data[(self.name_regionalized_biosphere_database, unique_id)] = {
-                                "name": water_flow,
-                                "unit": 'cubic meter',
-                                "type": 'emission',
-                                "categories": ('water', subcomp),
-                                "code": unique_id}
+    def importing_impact_world_plus(self):
+        """
+        Function loads the IMPACT World+ LCIA methodology, the fully regionalized version
+        """
 
-                        # specific for unspecified subcomp
-                        unique_id = uuid.uuid4().hex
-                        biosphere_data[(self.name_regionalized_biosphere_database, unique_id)] = {
-                            "name": water_flow,
-                            "unit": 'cubic meter',
-                            "type": 'emission',
-                            "categories": ('water',),
-                            "code": unique_id}
-
-        bw2.Database(self.name_regionalized_biosphere_database).write(biosphere_data)
+        bw2.BW2Package.import_file(pkg_resources.resource_filename(
+            __name__, '/Data/impact_world_plus_201_regionalized.ea4b5ad0766f4bb60242724bd3ee92ec.bw2package'))
 
     def create_ecoinvent_with_regionalized_biosphere_flows(self):
         """
@@ -187,180 +197,82 @@ class Regioinvent:
         :return: self.new_regionalized_ecoinvent_database_name
         """
 
-        relevant_subcomps = [('natural resource', 'in water'), ('natural resource', 'in ground'),
-                             ('natural resource', 'fossil well'),
-                             ('water',), ('water', 'surface water'), ('water', 'ground-'),
-                             ('water', 'ground-, long-term'),
-                             ('water', 'fossil well')]
+        self.logger.info("Regionalizing the biosphere inputs of the original ecoinvent database...")
 
-        data = {}
-        for act in [i for i in bw2.Database(self.ecoinvent_database_name)]:
-            # first, create all activities with modified metadata
-            dict_activity = act.as_dict().copy()
-            dict_activity['database'] = self.new_regionalized_ecoinvent_database_name
-            data[(self.new_regionalized_ecoinvent_database_name, act.key[1])] = dict_activity
-            data[(self.new_regionalized_ecoinvent_database_name, act.key[1])]['exchanges'] = []
+        base_regionalized_flows = set([', '.join(i.as_dict()['name'].split(', ')[:-1]) for i in
+                                       bw2.Database(self.name_regionalized_biosphere_database)])
+        regionalized_flows = {(i.as_dict()['name'], i.as_dict()['categories']): i.as_dict()['code'] for i in
+                              bw2.Database(self.name_regionalized_biosphere_database)}
+        ei_iw_geo_mapping = pd.read_excel(pkg_resources.resource_filename(
+            __name__, '/Data/ei_iw_geo_mapping.xlsx')).fillna('NA').set_index('ecoinvent')
 
-            # second, create the exchanges with new regionalized water flows
-            for exc in [i for i in act.exchanges()]:
-                # check exchange has a name
-                if 'name' in exc.as_dict():
-                    # check exchange is a water flow
-                    if exc.as_dict()['name'] in self.water_flows_in_ecoinvent:
-                        # check it's a water flows in water comp and not ocean subcomp
-                        if (bw2.Database('biosphere3').get(exc.as_dict()['flow']).as_dict()['categories'] in relevant_subcomps):
-
-                            # identify the regionalized water flow ID
-                            new_water_flow_id = [i for i in bw2.Database(self.name_regionalized_biosphere_database) if (
-                                    i['name'] == exc.as_dict()['name'] + ', ' + act.as_dict()['location'] and
-                                    i['categories'] == bw2.Database('biosphere3').get(
-                                exc.as_dict()['flow']).as_dict()['categories'])][0].key
-
-                            # add the exchange to the list
-                            exc.as_dict()['flow'] = new_water_flow_id[1]
-                            exc.as_dict()['input'] = new_water_flow_id
-                            exc.as_dict()['name'] = exc.as_dict()['name'] + ', ' + act.as_dict()['location']
-                            exc.as_dict()['output'] = (self.new_regionalized_ecoinvent_database_name, act.key[1])
-                            data[(self.new_regionalized_ecoinvent_database_name, act.key[1])]['exchanges'].append(
-                                exc.as_dict())
-
+        for process in self.ei_wurst:
+            process['database'] = self.name_ei_with_regionalized_biosphere
+            for exc in process['exchanges']:
+                if exc['type'] == 'biosphere':
+                    if exc['name'] in base_regionalized_flows:
+                        if 'Water' in exc['name']:
+                            if (exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'water'],
+                                exc['categories']) in regionalized_flows.keys():
+                                exc['code'] = regionalized_flows[(
+                                exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'water'],
+                                exc['categories'])]
+                                exc['database'] = self.name_regionalized_biosphere_database
+                                exc['name'] = exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'water']
+                                exc['input'] = (exc['database'], exc['code'])
+                        elif 'Occupation' in exc['name'] or 'Transformation' in exc['name']:
+                            if (exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'land'],
+                                exc['categories']) in regionalized_flows.keys():
+                                exc['code'] = regionalized_flows[(
+                                exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'land'],
+                                exc['categories'])]
+                                exc['database'] = self.name_regionalized_biosphere_database
+                                exc['name'] = exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'land']
+                                exc['input'] = (exc['database'], exc['code'])
+                            elif (exc['name'] + ', GLO', exc['categories']) in regionalized_flows.keys():
+                                exc['code'] = regionalized_flows[(exc['name'] + ', GLO', exc['categories'])]
+                                exc['database'] = self.name_regionalized_biosphere_database
+                                exc['name'] = exc['name'] + ', GLO'
+                                exc['input'] = (exc['database'], exc['code'])
+                        elif exc['name'] in ['BOD5, Biological Oxygen Demand', 'COD, Chemical Oxygen Demand',
+                                             'Phosphoric acid', 'Phosphorus']:
+                            if (exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'eutro'],
+                                exc['categories']) in regionalized_flows.keys():
+                                exc['code'] = regionalized_flows[(
+                                exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'eutro'],
+                                exc['categories'])]
+                                exc['database'] = self.name_regionalized_biosphere_database
+                                exc['name'] = exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'eutro']
+                                exc['input'] = (exc['database'], exc['code'])
                         else:
-                            # if it's not a regionalized water flow exchange, just copy paste the exchange
-                            exc.as_dict()['output'] = (self.new_regionalized_ecoinvent_database_name, act.key[1])
-                            data[(self.new_regionalized_ecoinvent_database_name, act.key[1])]['exchanges'].append(
-                                exc.as_dict())
-                    else:
-                        # if it's not a regionalized water flow exchange, just copy paste the exchange
-                        if exc.as_dict()['type'] == 'biosphere':
-                            exc.as_dict()['input'] = ('biosphere3', exc.as_dict()['input'][1])
-                        else:
-                            exc.as_dict()['input'] = (
-                            self.new_regionalized_ecoinvent_database_name, exc.as_dict()['input'][1])
-                        exc.as_dict()['output'] = (self.new_regionalized_ecoinvent_database_name, act.key[1])
-                        data[(self.new_regionalized_ecoinvent_database_name, act.key[1])]['exchanges'].append(exc.as_dict())
+                            if (exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'acid'],
+                                exc['categories']) in regionalized_flows.keys():
+                                exc['code'] = regionalized_flows[(
+                                exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'acid'],
+                                exc['categories'])]
+                                exc['database'] = self.name_regionalized_biosphere_database
+                                exc['name'] = exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'acid']
+                                exc['input'] = (exc['database'], exc['code'])
                 else:
-                    # if it's not a regionalized water flow exchange, just copy paste the exchange
-                    if exc.as_dict()['type'] == 'biosphere':
-                        exc.as_dict()['input'] = ('biosphere3', exc.as_dict()['input'][1])
-                    else:
-                        exc.as_dict()['input'] = (self.new_regionalized_ecoinvent_database_name, exc.as_dict()['input'][1])
-                    exc.as_dict()['output'] = (self.new_regionalized_ecoinvent_database_name, act.key[1])
-                    data[(self.new_regionalized_ecoinvent_database_name, act.key[1])]['exchanges'].append(exc.as_dict())
+                    exc['database'] = self.name_ei_with_regionalized_biosphere
 
-        bw2.Database(self.new_regionalized_ecoinvent_database_name).write(data)
+        ei_regio_bio_data = {(i['database'], i['code']): i for i in self.ei_wurst}
 
-    def link_regionalized_biosphere_to_regionalized_CFs(self):
-        """
-        Function loads the IMPACT World+ LCIA methodology and connects it to the regionalized version of ecoinvent with
-        water flows
-        :return:
-        """
+        # recreate inputs in edges (exchanges)
+        for pr in ei_regio_bio_data:
+            for exc in ei_regio_bio_data[pr]['exchanges']:
+                try:
+                    exc['input']
+                except KeyError:
+                    exc['input'] = (exc['database'], exc['code'])
+        # wurst creates empty categories for activities, this creates an issue when you try to write the bw2 database
+        for pr in ei_regio_bio_data:
+            try:
+                del ei_regio_bio_data[pr]['categories']
+            except KeyError:
+                pass
 
-        # load regular IW+
-        ei_iw = pd.read_excel(pkg_resources.resource_filename(
-            __name__, '/Data/impact_world_plus_2.0.1_expert_version_ecoinvent_v39.xlsx')).drop('Unnamed: 0', axis=1)
-
-        not_regio_bw_flows_with_codes = (pd.DataFrame(
-                [(i.as_dict()['name'], i.as_dict()['categories'][0], i.as_dict()['categories'][1], i.as_dict()['code'])
-                 if len(i.as_dict()['categories']) == 2
-                 else (i.as_dict()['name'], i.as_dict()['categories'][0], 'unspecified', i.as_dict()['code'])
-                 for i in bw2.Database('biosphere3')],
-                columns=['Elem flow name', 'Compartment', 'Sub-compartment', 'code']))
-
-        ei_iw_db = ei_iw.merge(not_regio_bw_flows_with_codes, on=['Elem flow name', 'Compartment', 'Sub-compartment'])
-
-        # make regionalized iw+
-        iw = pd.read_excel(pkg_resources.resource_filename(
-            __name__, '/Data/impact_world_plus_2.0.1_water_categories.xlsx')).drop(['Unnamed: 0'], axis=1)
-        regio_bw_flows_with_codes = (pd.DataFrame(
-                [(i.as_dict()['name'], i.as_dict()['categories'][0], i.as_dict()['categories'][1], i.as_dict()['code'])
-                 if len(i.as_dict()['categories']) == 2
-                 else (i.as_dict()['name'], i.as_dict()['categories'][0], 'unspecified', i.as_dict()['code'])
-                 for i in bw2.Database(self.name_regionalized_biosphere_database)],
-                columns=['Elem flow name', 'Compartment', 'Sub-compartment', 'code']))
-
-        with open(pkg_resources.resource_filename(__name__, '/Data/comps.json'), 'r') as f:
-            comps = json.load(f)
-
-        with open(pkg_resources.resource_filename(__name__, '/Data/subcomps.json'), 'r') as f:
-            subcomps = json.load(f)
-
-        iw.Compartment = [comps[i] for i in iw.Compartment]
-        iw.loc[:, 'Sub-compartment'] = [subcomps[i] for i in iw.loc[:, 'Sub-compartment']]
-
-        # special cases: fossil well subcomp in water comp = ground- subcomp
-        df = iw.loc[[i for i in iw.index if (iw.loc[i, 'Sub-compartment'] == 'ground-' and
-                                             iw.loc[i, 'Compartment'] == 'water')]].copy()
-        df.loc[:, 'Sub-compartment'] = 'fossil well'
-        iw = pd.concat([iw, df])
-        iw = clean_up_dataframe(iw)
-
-        # special cases: fossil well subcomp in raw comp = in ground subcomp
-        df = iw.loc[[i for i in iw.index if (iw.loc[i, 'Sub-compartment'] == 'in ground' and
-                                             iw.loc[i, 'Compartment'] == 'natural resource')]].copy()
-        df.loc[:, 'Sub-compartment'] = 'fossil well'
-        iw = pd.concat([iw, df])
-        iw = clean_up_dataframe(iw)
-
-        concordance = pd.read_excel(pkg_resources.resource_filename(__name__, '/Data/concordance.xlsx'))
-        concordance = dict(list(zip(concordance.loc[:, 'Name ecoinvent'], concordance.loc[:, 'Name iw+'])))
-        regio_bw_flows_with_codes.loc[:, 'Elem flow name'] = [
-            concordance[i] for i in regio_bw_flows_with_codes.loc[:, 'Elem flow name']]
-
-        ei_in_bw = pd.concat(
-            [ei_iw_db, iw.merge(regio_bw_flows_with_codes, on=['Elem flow name', 'Compartment', 'Sub-compartment'])])
-        ei_in_bw.set_index(['Impact category', 'CF unit'], inplace=True)
-
-        # make total HH and total EQ categories
-        total_HH = ei_in_bw.loc(axis=0)[:, 'DALY'].groupby(
-            by=['code', 'Compartment', 'Sub-compartment', 'Elem flow name', 'CAS number',
-                'Elem flow unit', 'MP or Damage']).sum().reset_index()
-        total_HH.loc[:, 'Impact category'] = 'Total human health'
-        total_HH.loc[:, 'CF unit'] = 'DALY'
-        total_HH = total_HH.set_index(['Impact category', 'CF unit'])
-
-        total_EQ = ei_in_bw.loc(axis=0)[:, 'PDF.m2.yr'].groupby(
-            by=['code', 'Compartment', 'Sub-compartment', 'Elem flow name', 'CAS number',
-                'Elem flow unit', 'MP or Damage']).sum().reset_index()
-        total_EQ.loc[:, 'Impact category'] = 'Total ecosystem quality'
-        total_EQ.loc[:, 'CF unit'] = 'PDF.m2.yr'
-        total_EQ = total_EQ.set_index(['Impact category', 'CF unit'])
-
-        ei_in_bw = pd.concat([ei_in_bw, total_HH, total_EQ])
-
-        impact_categories = ei_in_bw.index.drop_duplicates()
-        for ic in impact_categories:
-            if ei_in_bw.loc[[ic], 'MP or Damage'].iloc[0] == 'Midpoint':
-                mid_end = 'Midpoint'
-                # create the name of the method
-                name = ('IMPACT World+ ' + mid_end + ' ' + '2.0.1_regionalized', 'Midpoint', ic[0])
-            else:
-                mid_end = 'Damage'
-                # create the name of the method
-                if ic[1] == 'DALY':
-                    name = ('IMPACT World+ ' + mid_end + ' ' + '2.0.1_regionalized', 'Human health', ic[0])
-                else:
-                    name = ('IMPACT World+ ' + mid_end + ' ' + '2.0.1_regionalized', 'Ecosystem quality', ic[0])
-
-            # initialize the "Method" method
-            new_method = bw2.Method(name)
-            # register the new method
-            new_method.register()
-            # set its unit
-            new_method.metadata["unit"] = ic[1]
-
-            df = ei_in_bw.loc[[ic], ['code', 'CF value']].copy()
-            df.set_index('code', inplace=True)
-
-            data = []
-            biosphere3 = [i.as_dict()['code'] for i in bw2.Database('biosphere3')]
-            biosphere3_regio = [i.as_dict()['code'] for i in bw2.Database(self.name_regionalized_biosphere_database)]
-            for stressor in df.index:
-                if stressor in biosphere3:
-                    data.append((('biosphere3', stressor), df.loc[stressor, 'CF value']))
-                elif stressor in biosphere3_regio:
-                    data.append(((self.name_regionalized_biosphere_database, stressor), df.loc[stressor, 'CF value']))
-            new_method.write(data)
+        bw2.Database(self.name_ei_with_regionalized_biosphere).write(ei_regio_bio_data)
 
     def first_order_regionalization(self):
         """
