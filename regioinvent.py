@@ -165,12 +165,19 @@ class Regioinvent:
             if 'IMPACT World+ Damage 2.0.1_regionalized' not in [i[0] for i in list(bw2.methods)]:
                 self.logger.info("Importing regionalized LCIA method...")
                 self.importing_impact_world_plus()
-
-        self.logger.info("Extracting ecoinvent to wurst...")
-        self.ei_wurst = wurst.extract_brightway2_databases(self.ecoinvent_database_name, add_identifiers=True)
-        if self.regio_bio:
             if self.name_ei_with_regionalized_biosphere not in bw2.databases:
+                self.logger.info("Extracting ecoinvent to wurst...")
+                self.ei_wurst = wurst.extract_brightway2_databases(self.ecoinvent_database_name, add_identifiers=True)
                 self.create_ecoinvent_with_regionalized_biosphere_flows()
+            elif self.name_ei_with_regionalized_biosphere in bw2.databases:
+                self.logger.info("Extracting ecoinvent to wurst...")
+                self.ei_wurst = wurst.extract_brightway2_databases(self.name_ei_with_regionalized_biosphere,
+                                                                   add_identifiers=True)
+        else:
+            self.logger.info("Extracting ecoinvent to wurst...")
+            self.ei_wurst = wurst.extract_brightway2_databases(self.ecoinvent_database_name, add_identifiers=True)
+
+        # as a dictionary to speed things up later
         self.ei_in_dict = {(i['reference product'], i['location'], i['name']): i for i in self.ei_wurst}
 
     def create_regionalized_biosphere_flows(self):
@@ -385,7 +392,7 @@ class Regioinvent:
                                      ws.equals("reference product", product),
                                      ws.equals("name", activity),
                                      ws.equals("location", region),
-                                     ws.equals("database", self.ecoinvent_database_name),
+                                     ws.equals("database", self.name_ei_with_regionalized_biosphere),
                                      ws.exclude(ws.contains("name", "market for")),
                                      ws.exclude(ws.contains("name", "market group for")),
                                      ws.exclude(ws.contains("name", "generic market")),
@@ -679,7 +686,7 @@ class Regioinvent:
                                            "unit": unit_name,
                                            "database": self.regioinvent_database_name,
                                            "type": "technosphere",
-                                           "input": (self.ecoinvent_database_name, electricity_code),
+                                           "input": (self.name_ei_with_regionalized_biosphere, electricity_code),
                                            "output": (process['database'], process['code'])})
 
         return process
@@ -732,7 +739,7 @@ class Regioinvent:
                                            "unit": unit_name,
                                            "database": self.regioinvent_database_name,
                                            "type": "technosphere",
-                                           "input": (self.ecoinvent_database_name, electricity_code),
+                                           "input": (self.name_ei_with_regionalized_biosphere, electricity_code),
                                            "output": (process['database'], process['code'])})
 
         return process
@@ -777,7 +784,7 @@ class Regioinvent:
                                            "unit": unit_name,
                                            "database": self.regioinvent_database_name,
                                            "type": "technosphere",
-                                           "input": (self.ecoinvent_database_name, electricity_code),
+                                           "input": (self.name_ei_with_regionalized_biosphere, electricity_code),
                                            "output": (process['database'], process['code'])})
 
         return process
@@ -826,7 +833,7 @@ class Regioinvent:
                                            "unit": unit_name,
                                            "database": self.regioinvent_database_name,
                                            "type": "technosphere",
-                                           "input": (self.ecoinvent_database_name, waste_code),
+                                           "input": (self.name_ei_with_regionalized_biosphere, waste_code),
                                            "output": (process['database'], process['code'])})
 
         return process
@@ -933,7 +940,7 @@ class Regioinvent:
         region_heat_process = ws.get_many(self.ei_wurst,
                                           ws.equals("reference product", heat_flow),
                                           ws.equals("location", region_heat),
-                                          ws.equals("database", self.ecoinvent_database_name),
+                                          ws.equals("database", self.name_ei_with_regionalized_biosphere),
                                           ws.contains("name", "market for"))
 
         # extracting amount of heat of country within region heat market process
