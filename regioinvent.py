@@ -636,7 +636,69 @@ class Regioinvent:
                                         i['input'] != duplicate] + [
                                            {'amount': total, 'type': 'technosphere', 'input': duplicate}]
 
-        self.logger.info("Finished, you can now write the database...")
+    def regionalize_elem_flows(self):
+        """
+        Function regionalizes the elementary flows of the regioinvent processes to the location of process.
+        """
+
+        self.logger.info("Regionalizing the elementary flows of the regioinvent database...")
+
+        base_regionalized_flows = set([', '.join(i.as_dict()['name'].split(', ')[:-1]) for i in
+                                       bw2.Database(self.name_regionalized_biosphere_database)])
+        regionalized_flows = {(i.as_dict()['name'], i.as_dict()['categories']): i.as_dict()['code'] for i in
+                              bw2.Database(self.name_regionalized_biosphere_database)}
+        regio_iw_geo_mapping = pd.read_excel(pkg_resources.resource_filename(
+            __name__, '/Data/regio_iw_geo_mapping.xlsx')).fillna('NA').set_index('regioinvent')
+
+        for process in self.regioinvent_in_wurst:
+            for exc in process['exchanges']:
+                if exc['type'] == 'biosphere':
+                    if ', '.join(exc['name'].split(', ')[:-1]) in base_regionalized_flows:
+                        exc['name'] = ', '.join(exc['name'].split(', ')[:-1])
+                        if 'Water' in exc['name']:
+                            if (exc['name'] + ', ' + regio_iw_geo_mapping.loc[process['location'], 'water'],
+                                exc['categories']) in regionalized_flows.keys():
+                                exc['code'] = regionalized_flows[(
+                                exc['name'] + ', ' + regio_iw_geo_mapping.loc[process['location'], 'water'],
+                                exc['categories'])]
+                                exc['database'] = self.name_regionalized_biosphere_database
+                                exc['name'] = exc['name'] + ', ' + regio_iw_geo_mapping.loc[
+                                    process['location'], 'water']
+                                exc['input'] = (exc['database'], exc['code'])
+                        elif 'Occupation' in exc['name'] or 'Transformation' in exc['name']:
+                            if (exc['name'] + ', ' + regio_iw_geo_mapping.loc[process['location'], 'land'],
+                                exc['categories']) in regionalized_flows.keys():
+                                exc['code'] = regionalized_flows[(
+                                exc['name'] + ', ' + regio_iw_geo_mapping.loc[process['location'], 'land'],
+                                exc['categories'])]
+                                exc['database'] = self.name_regionalized_biosphere_database
+                                exc['name'] = exc['name'] + ', ' + regio_iw_geo_mapping.loc[process['location'], 'land']
+                                exc['input'] = (exc['database'], exc['code'])
+                            elif (exc['name'] + ', GLO', exc['categories']) in regionalized_flows.keys():
+                                exc['code'] = regionalized_flows[(exc['name'] + ', GLO', exc['categories'])]
+                                exc['database'] = self.name_regionalized_biosphere_database
+                                exc['name'] = exc['name'] + ', GLO'
+                                exc['input'] = (exc['database'], exc['code'])
+                        elif exc['name'] in ['BOD5, Biological Oxygen Demand', 'COD, Chemical Oxygen Demand',
+                                             'Phosphoric acid', 'Phosphorus']:
+                            if (exc['name'] + ', ' + regio_iw_geo_mapping.loc[process['location'], 'eutro'],
+                                exc['categories']) in regionalized_flows.keys():
+                                exc['code'] = regionalized_flows[(
+                                exc['name'] + ', ' + regio_iw_geo_mapping.loc[process['location'], 'eutro'],
+                                exc['categories'])]
+                                exc['database'] = self.name_regionalized_biosphere_database
+                                exc['name'] = exc['name'] + ', ' + regio_iw_geo_mapping.loc[
+                                    process['location'], 'eutro']
+                                exc['input'] = (exc['database'], exc['code'])
+                        else:
+                            if (exc['name'] + ', ' + regio_iw_geo_mapping.loc[process['location'], 'acid'],
+                                exc['categories']) in regionalized_flows.keys():
+                                exc['code'] = regionalized_flows[(
+                                exc['name'] + ', ' + regio_iw_geo_mapping.loc[process['location'], 'acid'],
+                                exc['categories'])]
+                                exc['database'] = self.name_regionalized_biosphere_database
+                                exc['name'] = exc['name'] + ', ' + regio_iw_geo_mapping.loc[process['location'], 'acid']
+                                exc['input'] = (exc['database'], exc['code'])
 
     # ==================================================================================================================
     # -------------------------------------------Supporting functions---------------------------------------------------
