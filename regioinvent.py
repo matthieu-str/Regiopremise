@@ -302,7 +302,7 @@ class Regioinvent:
             cmd_export_data = cmd_export_data.groupby('reporterISO').agg({'qty': 'mean'})
             exporters = (cmd_export_data.qty / cmd_export_data.qty.sum()).sort_values(ascending=False)
             # only keep the countries representing 99% of global exports of the product and create a RoW from that
-            limit = exporters.index.get_loc(exporters[exporters.cumsum() > 0.99].index[0]) + 1
+            limit = exporters.index.get_loc(exporters[exporters.cumsum() > 0.95].index[0]) + 1
             remainder = exporters.iloc[limit:].sum()
             exporters = exporters.iloc[:limit]
             if 'RoW' in exporters.index:
@@ -513,7 +513,7 @@ class Regioinvent:
             importers = (cmd_consumption_data.groupby(level=0).sum() /
                          cmd_consumption_data.sum().sum()).sort_values(by='qty', ascending=False)
             # only keep importers till the 99% of total imports
-            limit = importers.index.get_loc(importers[importers.cumsum() > 0.99].dropna().index[0]) + 1
+            limit = importers.index.get_loc(importers[importers.cumsum() > 0.95].dropna().index[0]) + 1
             # aggregate the rest
             remainder = cmd_consumption_data.loc[importers.index[limit:]].groupby(level=1).sum()
             cmd_consumption_data = cmd_consumption_data.loc[importers.index[:limit]]
