@@ -53,3 +53,6 @@ _incoming through a scientific article_
 
 ## Support
 Contact [maxime.agez@polymtl.ca](mailto:maxime.agez@polymtl.ca)
+
+## Citation
+https://doi.org/10.5281/zenodo.11836126
