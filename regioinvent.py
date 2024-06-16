@@ -93,6 +93,7 @@ class Regioinvent:
         self.regioinvent_in_wurst = []
         self.regioinvent_in_dict = {}
         self.distribution_technologies = {}
+        self.transportation_modes = {}
         self.created_geographies = dict.fromkeys(self.eco_to_hs_class.keys())
         self.unit = dict.fromkeys(self.eco_to_hs_class.keys())
         self.base_iw_water_flows = ['Water',
@@ -331,16 +332,22 @@ class Regioinvent:
                 possibilities[available_technologies[i]].append(geo)
 
             # determine the market share of each technology
+            self.transportation_modes[product] = {}
             self.distribution_technologies[product] = {tech: 0 for tech in available_technologies}
             market_processes = ws.get_many(self.ei_wurst,
                                            ws.equals('reference product', product),
                                            ws.either(ws.contains('name', 'market for'),
                                                      ws.contains('name', 'market group for')))
+            number_of_markets = 0
             for ds in market_processes:
+                number_of_markets += 1
                 for exc in ds['exchanges']:
                     if exc['product'] == product:
                         if exc['name'] in possibilities.keys():
                             self.distribution_technologies[product][exc['name']] += exc['amount']
+                    if 'transport' in exc['name'] and ('market for' in exc['name'] or 'market group for' in exc['name']):
+                        self.transportation_modes[product][exc['code']] = exc['amount']
+            # average the technology market share
             sum_ = sum(self.distribution_technologies[product].values())
             if sum_ != 0:
                 self.distribution_technologies[product] = {k: v / sum_ for k, v in
@@ -348,6 +355,10 @@ class Regioinvent:
             else:
                 self.distribution_technologies[product] = {k: 1/len(self.distribution_technologies[product])
                                                            for k, v in self.distribution_technologies[product].items()}
+            # average the transportation modes
+            if number_of_markets > 1:
+                self.transportation_modes[product] = {k: v / number_of_markets for k, v in
+                                                      self.transportation_modes[product].items()}
 
             # create the global production market process within regioinvent
             global_market_activity = copy.deepcopy(dataset)
@@ -356,10 +367,7 @@ class Regioinvent:
             global_market_activity['name'] = f"""production market for {product}"""
 
             # add a comment
-            global_market_activity['comment'] = f"""This process represents the global production market for {product}. The amounts come from export data from the UN 
-            COMTRADE database. Data from UN COMTRADE is already in physical units. An average of the 5 last years of export trade available data is taken 
-            (in general from 2019 to 2023). Countries are taken until 99% of the global production amounts are covered, the rest of the data is aggregated in a RoW 
-            (Rest-of-the-World) region."""
+            global_market_activity['comment'] = f"""This process represents the global production market for {product}. The shares come from export data from the UN COMTRADE database. Data from UN COMTRADE is already in physical units. An average of the 5 last years of export trade available data is taken (in general from 2019 to 2023). Countries are taken until 95% of the global production amounts are covered, the rest of the data is aggregated in a RoW (Rest-of-the-World) region."""
 
             # location will be global (global market)
             global_market_activity['location'] = 'GLO'
@@ -410,6 +418,8 @@ class Regioinvent:
                 regio_process['code'] = uuid.uuid4().hex
                 # change database
                 regio_process['database'] = self.regioinvent_database_name
+                # add comment
+                regio_process['comment'] = f'This process is a regionalized adaptation of the following process of the ecoinvent database: {activity} | {product} | {region}. No amount values were modified in the regionalization process, only their origin.'
                 # update production exchange. Should always be the first one that comes out
                 regio_process['exchanges'][0]['code'] = regio_process['code']
                 regio_process['exchanges'][0]['database'] = regio_process['database']
@@ -457,36 +467,37 @@ class Regioinvent:
 
                     # for each input, we test the presence of said inputs and regionalize that input
                     if regio_process:
-                        if self.test_input_presence(regio_process, 'electricity', 'technosphere',
-                                                    extra='aluminium/electricity'):
+                        if self.test_input_presence(regio_process, 'electricity', extra='aluminium/electricity'):
                             regio_process = self.change_aluminium_electricity(regio_process, exporter)
-                        elif self.test_input_presence(regio_process, 'electricity', 'technosphere',
-                                                      extra='cobalt/electricity'):
+                        elif self.test_input_presence(regio_process, 'electricity', extra='cobalt/electricity'):
                             regio_process = self.change_cobalt_electricity(regio_process)
-                        elif self.test_input_presence(regio_process, 'electricity', 'technosphere', extra='voltage'):
+                        elif self.test_input_presence(regio_process, 'electricity', extra='voltage'):
                             regio_process = self.change_electricity(regio_process, exporter)
-                        if self.test_input_presence(regio_process, 'municipal solid waste', 'technosphere'):
+                        if self.test_input_presence(regio_process, 'municipal solid waste'):
                             regio_process = self.change_waste(regio_process, exporter)
-                        # if self.test_input_presence(regio_process, 'Water', 'biosphere'):
-                        #     regio_process = self.change_water(regio_process, exporter, exporter)
-                        if self.test_input_presence(regio_process, 'heat, district or industrial, natural gas',
-                                                    'technosphere'):
+                        if self.test_input_presence(regio_process, 'heat, district or industrial, natural gas'):
                             regio_process = self.change_heat(regio_process, exporter,
                                                              'heat, district or industrial, natural gas')
                         if self.test_input_presence(regio_process,
-                                                    'heat, district or industrial, other than natural gas',
-                                                    'technosphere'):
+                                                    'heat, district or industrial, other than natural gas'):
                             regio_process = self.change_heat(regio_process, exporter,
                                                              'heat, district or industrial, other than natural gas')
                         if self.test_input_presence(regio_process,
-                                                    'heat, central or small-scale, other than natural gas',
-                                                    'technosphere'):
+                                                    'heat, central or small-scale, other than natural gas'):
                             regio_process = self.change_heat(regio_process, exporter,
                                                              'heat, central or small-scale, other than natural gas')
                     # register the regionalized process within the database
                     if regio_process:
                         self.regioinvent_in_wurst.append(regio_process)
-            # also register the created global production market
+
+            # add transportation to production market
+            for transportation_mode in self.transportation_modes[product]:
+                global_market_activity['exchanges'].append({
+                    'amount': self.transportation_modes[product][transportation_mode],
+                    'type': 'technosphere',
+                    'input': (self.name_ei_with_regionalized_biosphere, transportation_mode)
+                })
+            # and register the production market
             self.regioinvent_in_wurst.append(global_market_activity)
 
     def create_consumption_markets(self):
@@ -537,7 +548,7 @@ class Regioinvent:
                     'type': 'process',
                     'unit': self.unit[product],
                     'code': uuid.uuid4().hex,
-                    'comment': 'blablabla',
+                    'comment': f'This process represents the consumption market of {product} in {importer}. The shares were determined based on two aspects. The imports of the product taken from the UN COMTRADE (average over the last 5 available years) as well as the domestic production estimate for the corresponding sector in the corresponding region of taken from the EXIOBASE database. Shares are considered until 95% of the imports+domestic consumption are covered. Residual imports are aggregated in a RoW (Rest-of-the-World) region.',
                     'database': self.regioinvent_database_name,
                     'exchanges': []
                 }
@@ -573,6 +584,13 @@ class Regioinvent:
                                 'input': (self.regioinvent_database_name, code),
                                 'name': product
                             })
+                # add transportation to consumption market
+                for transportation_mode in self.transportation_modes[product]:
+                    new_import_data['exchanges'].append({
+                        'amount': self.transportation_modes[product][transportation_mode],
+                        'type': 'technosphere',
+                        'input': (self.name_ei_with_regionalized_biosphere, transportation_mode)
+                    })
 
                 # check for duplicate input codes with different values (coming from RoW)
                 duplicates = [item for item, count in
@@ -641,6 +659,11 @@ class Regioinvent:
         Function regionalizes the elementary flows of the regioinvent processes to the location of process.
         """
 
+        if not self.regio_bio:
+            self.logger.warning("If you wish to regionalize elementary flows, you need to select the correct boolean "
+                                "in the initialization of the class...")
+            return
+
         self.logger.info("Regionalizing the elementary flows of the regioinvent database...")
 
         base_regionalized_flows = set([', '.join(i.as_dict()['name'].split(', ')[:-1]) for i in
@@ -700,7 +723,6 @@ class Regioinvent:
                                 exc['name'] = exc['name'] + ', ' + regio_iw_geo_mapping.loc[process['location'], 'acid']
                                 exc['input'] = (exc['database'], exc['code'])
 
-    # ==================================================================================================================
     # -------------------------------------------Supporting functions---------------------------------------------------
 
     def change_electricity(self, process, export_country):
@@ -906,60 +928,6 @@ class Regioinvent:
 
         return process
 
-    def change_water(self, process, export_country, region):
-        for water_type in self.water_flows_in_ecoinvent:
-            water_flow_name = [i['name'] for i in process['exchanges'] if
-                               i['name'].split(', ' + region)[0] == water_type and i['categories'][0] != 'air']
-            if water_flow_name:
-                # check only one water flow identified
-                assert len(water_flow_name) == 1
-                water_flow_name = water_flow_name[0]
-                unit_name = list(set([i['unit'] for i in process['exchanges'] if
-                                      i['name'].split(', ' + region)[0] == water_type and i['categories'][
-                                          0] != 'air']))[0]
-                qty_of_water_flow = sum([i['amount'] for i in process['exchanges'] if
-                                         i['name'].split(', ' + region)[0] == water_type and i['categories'][
-                                             0] != 'air'])
-                categories = [i['categories'] for i in process['exchanges'] if
-                              i['name'].split(', ' + region)[0] == water_type and i['categories'][0] != 'air'][0]
-
-                # remove water flows from non-appropriated geography
-                for exc in process['exchanges'][:]:
-                    if exc['name'].split(', ' + region)[0] == water_type and exc['categories'][0] != 'air':
-                        process['exchanges'].remove(exc)
-
-                if export_country in self.water_geos:
-                    water_key = (self.name_regionalized_biosphere_database, [pickle.loads(i)['code'] for i in pd.read_sql(
-                        f"""SELECT data FROM activitydataset WHERE name='{water_type + ', ' + export_country}' AND 
-                            database='{self.name_regionalized_biosphere_database}'""", self.ecoinvent_conn).data if
-                                                                        pickle.loads(i)['categories'] == categories][0])
-                elif export_country in self.country_to_ecoinvent_regions:
-                    for potential_region in self.country_to_ecoinvent_regions[export_country]:
-                        if potential_region in self.water_geos:
-                            water_key = (self.name_regionalized_biosphere_database, [pickle.loads(i)['code'] for i in pd.read_sql(
-                        f"""SELECT data FROM activitydataset WHERE name='{
-                        water_type + ', ' + potential_region}' AND 
-                            database='{self.name_regionalized_biosphere_database}'""", self.ecoinvent_conn).data if
-                                                                        pickle.loads(i)['categories'] == categories][0])
-                else:
-                    water_key = (self.name_regionalized_biosphere_database, [pickle.loads(i)['code'] for i in pd.read_sql(
-                        f"""SELECT data FROM activitydataset WHERE name='{water_type + ', RoW'}' AND  
-                        database='{self.name_regionalized_biosphere_database}'""", self.ecoinvent_conn).data if
-                                                                        pickle.loads(i)['categories'] == categories][0])
-
-                # create the regionalized flow for waste
-                process['exchanges'].append({"amount": qty_of_water_flow,
-                                                   "product": None,
-                                                   "name": water_flow_name,
-                                                   "location": None,
-                                                   "unit": unit_name,
-                                                   "database": self.name_regionalized_biosphere_database,
-                                                   "categories": categories,
-                                                   "input": water_key,
-                                                   "type": "biosphere"})
-
-        return process
-
     def change_heat(self, process, export_country, heat_flow):
         """
         This function changes a heat input of a process by the national (or regional) mix
@@ -1038,12 +1006,11 @@ class Regioinvent:
 
         return process
 
-    def test_input_presence(self, process, input_name, input_type, extra=None):
+    def test_input_presence(self, process, input_name, extra=None):
         """
         Function that checks if an input is present in a given process
         :param process: The process to check whether the input is in it or not
         :param input_name: The name of the input to check
-        :param input_type: The type of the input, i.e., either technosphere or biosphere
         :param extra: Extra information to look for very specific inputs
         :return: a boolean of whether the input is present or not
         """
@@ -1057,13 +1024,8 @@ class Regioinvent:
             for exc in ws.technosphere(process, ws.contains("name", input_name), ws.contains("name", "voltage")):
                 return True
         else:
-            if input_type == 'technosphere':
-                for exc in ws.technosphere(process, ws.contains("name", input_name)):
-                    return True
-            elif input_type == 'biosphere':
-                for exc in ws.biosphere(process, *[ws.contains("name", input_name),
-                                                   ws.exclude(ws.equals("categories", ('air',)))]):
-                    return True
+            for exc in ws.technosphere(process, ws.contains("name", input_name)):
+                return True
 
     def format_export_data(self):
         """
