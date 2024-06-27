@@ -54,7 +54,7 @@ class Regioinvent:
         # set up necessary variables
         self.regioinvent_database_name = regioinvent_database_name
         self.ecoinvent_database_name = ecoinvent_database_name
-        self.name_ei_with_regionalized_biosphere = ecoinvent_database_name + ' with regionalized biosphere flows'
+        self.name_ei_with_regionalized_biosphere = ecoinvent_database_name + ' regionalized'
         self.name_regionalized_biosphere_database = 'biosphere3_regionalized_flows'
         self.regio_bio = regionalized_elementary_flows
         self.trade_conn = sqlite3.connect(trade_database_path)
@@ -92,6 +92,7 @@ class Regioinvent:
         self.assigned_random_geography = []
         self.regioinvent_in_wurst = []
         self.regioinvent_in_dict = {}
+        self.ei_regio_data = {}
         self.distribution_technologies = {}
         self.transportation_modes = {}
         self.created_geographies = dict.fromkeys(self.eco_to_hs_class.keys())
@@ -175,8 +176,14 @@ class Regioinvent:
                 self.ei_wurst = wurst.extract_brightway2_databases(self.name_ei_with_regionalized_biosphere,
                                                                    add_identifiers=True)
         else:
-            self.logger.info("Extracting ecoinvent to wurst...")
-            self.ei_wurst = wurst.extract_brightway2_databases(self.ecoinvent_database_name, add_identifiers=True)
+            if self.name_ei_with_regionalized_biosphere not in bw2.databases:
+                self.logger.info("Extracting ecoinvent to wurst...")
+                self.ei_wurst = wurst.extract_brightway2_databases(self.ecoinvent_database_name, add_identifiers=True)
+                self.create_ecoinvent_copy_without_regionalized_biosphere_flows()
+            elif self.name_ei_with_regionalized_biosphere in bw2.databases:
+                self.logger.info("Extracting ecoinvent to wurst...")
+                self.ei_wurst = wurst.extract_brightway2_databases(self.name_ei_with_regionalized_biosphere,
+                                                                   add_identifiers=True)
 
         # as a dictionary to speed things up later
         self.ei_in_dict = {(i['reference product'], i['location'], i['name']): i for i in self.ei_wurst}
@@ -264,29 +271,163 @@ class Regioinvent:
                 else:
                     exc['database'] = self.name_ei_with_regionalized_biosphere
 
-        ei_regio_bio_data = {(i['database'], i['code']): i for i in self.ei_wurst}
+        # add input key to each exchange
+        for pr in self.ei_wurst:
+            for exc in pr['exchanges']:
+                try:
+                    exc['input']
+                except KeyError:
+                    exc['input'] = (exc['database'], exc['code'])
+
+        # modify structure of data from wurst to bw2
+        self.ei_regio_data = {(i['database'], i['code']): i for i in self.ei_wurst}
 
         # recreate inputs in edges (exchanges)
-        for pr in ei_regio_bio_data:
-            for exc in ei_regio_bio_data[pr]['exchanges']:
+        for pr in self.ei_regio_data:
+            for exc in self.ei_regio_data[pr]['exchanges']:
                 try:
                     exc['input']
                 except KeyError:
                     exc['input'] = (exc['database'], exc['code'])
         # wurst creates empty categories for activities, this creates an issue when you try to write the bw2 database
-        for pr in ei_regio_bio_data:
+        for pr in self.ei_regio_data:
             try:
-                del ei_regio_bio_data[pr]['categories']
+                del self.ei_regio_data[pr]['categories']
             except KeyError:
                 pass
         # same with parameters
-        for pr in ei_regio_bio_data:
+        for pr in self.ei_regio_data:
             try:
-                del ei_regio_bio_data[pr]['parameters']
+                del self.ei_regio_data[pr]['parameters']
             except KeyError:
                 pass
 
-        bw2.Database(self.name_ei_with_regionalized_biosphere).write(ei_regio_bio_data)
+        # write ecoinvent-regionalized database
+        bw2.Database(self.name_ei_with_regionalized_biosphere).write(self.ei_regio_data)
+
+    def create_ecoinvent_copy_without_regionalized_biosphere_flows(self):
+        """
+        In case the user does not want to regionalize biosphere flows, we still need a copy of ecoinvent to be able to
+        regionalize it later on. The goal is to always keep a "pristine" ecoinvent version.
+        """
+
+        # and change the database name everywhere
+        for pr in self.ei_wurst:
+            pr['database'] = self.name_ei_with_regionalized_biosphere
+            for exc in pr['exchanges']:
+                if exc['type'] == 'technosphere':
+                    exc['input'] = (self.name_ei_with_regionalized_biosphere, exc['code'])
+                    exc['database'] = self.name_ei_with_regionalized_biosphere
+
+        # add input key to each exchange
+        for pr in self.ei_wurst:
+            for exc in pr['exchanges']:
+                try:
+                    exc['input']
+                except KeyError:
+                    exc['input'] = (exc['database'], exc['code'])
+
+        # modify structure of data from wurst to bw2
+        self.ei_regio_data = {(i['database'], i['code']): i for i in self.ei_wurst}
+
+        # recreate inputs in edges (exchanges)
+        for pr in self.ei_regio_data:
+            for exc in self.ei_regio_data[pr]['exchanges']:
+                try:
+                    exc['input']
+                except KeyError:
+                    exc['input'] = (exc['database'], exc['code'])
+        # wurst creates empty categories for activities, this creates an issue when you try to write the bw2 database
+        for pr in self.ei_regio_data:
+            try:
+                del self.ei_regio_data[pr]['categories']
+            except KeyError:
+                pass
+        # same with parameters
+        for pr in self.ei_regio_data:
+            try:
+                del self.ei_regio_data[pr]['parameters']
+            except KeyError:
+                pass
+
+        # write ecoinvent-regionalized database
+        bw2.Database(self.name_ei_with_regionalized_biosphere).write(self.ei_regio_data)
+
+    def format_export_data(self):
+        """
+        Function extracts and formats the export data from the trade database
+        :return: self.export_data
+        """
+
+        self.logger.info("Extracting and formatting export data from UN COMTRADE...")
+
+        self.export_data = pd.read_sql('SELECT * FROM "Export_data"', con=self.trade_conn)
+        # only keep total export values (no need for destination detail)
+        self.export_data = self.export_data[self.export_data.partnerISO == 'W00']
+        # check if AtlQty is defined whenever Qty is empty. If it is, then use that value.
+        self.export_data.loc[self.export_data.qty == 0, 'qty'] = self.export_data.loc[self.export_data.qty == 0, 'altQty']
+        # don't need AtlQty afterwards and drop zero values
+        self.export_data = self.export_data.drop('altQty', axis=1)
+        self.export_data = self.export_data.loc[self.export_data.qty != 0]
+        # DEAL WITH UNITS IN TRADE DATA
+        # remove mistakes in units from data reporter
+        self.export_data = self.export_data.drop([i for i in self.export_data.index if (
+                (self.export_data.loc[i, 'cmdCode'] == '7005' and self.export_data.loc[i, 'qtyUnitAbbr'] == 'kg') or
+                (self.export_data.loc[i, 'cmdCode'] == '850720' and self.export_data.loc[i, 'qtyUnitAbbr'] in ['kg','ce/el']) or
+                (self.export_data.loc[i, 'cmdCode'] == '280421' and self.export_data.loc[i, 'qtyUnitAbbr'] == 'u') or
+                (self.export_data.loc[i, 'cmdCode'] == '280440' and self.export_data.loc[i, 'qtyUnitAbbr'] == 'u'))])
+        # convert data in different units
+        self.export_data.loc[[i for i in self.export_data.index if self.export_data.loc[i, 'cmdCode'] == '2804' and self.export_data.loc[
+            i, 'qtyUnitAbbr'] == 'kg'], 'qty'] /= 0.08375  # kg/m3 density of hydrogen
+        self.export_data.loc[[i for i in self.export_data.index if self.export_data.loc[i, 'cmdCode'] == '280421' and self.export_data.loc[
+            i, 'qtyUnitAbbr'] == 'kg'], 'qty'] /= 1.784  # kg/m3 density of argon
+        self.export_data.loc[[i for i in self.export_data.index if self.export_data.loc[i, 'cmdCode'] == '280429' and self.export_data.loc[
+            i, 'qtyUnitAbbr'] == 'kg'], 'qty'] /= 0.166  # kg/m3 density of helium
+        self.export_data.loc[[i for i in self.export_data.index if self.export_data.loc[i, 'cmdCode'] == '4412' and self.export_data.loc[
+            i, 'qtyUnitAbbr'] == 'kg'], 'qty'] /= 700  # kg/m3 density of wood
+        # change unit name
+        self.export_data.loc[[i for i in self.export_data.index if self.export_data.loc[i, 'cmdCode'] == '2804' and self.export_data.loc[
+            i, 'qtyUnitAbbr'] == 'kg'], 'qtyUnitAbbr'] = 'm³'
+        self.export_data.loc[[i for i in self.export_data.index if self.export_data.loc[i, 'cmdCode'] == '280421' and self.export_data.loc[
+            i, 'qtyUnitAbbr'] == 'kg'], 'qtyUnitAbbr'] = 'm³'
+        self.export_data.loc[[i for i in self.export_data.index if self.export_data.loc[i, 'cmdCode'] == '280429' and self.export_data.loc[
+            i, 'qtyUnitAbbr'] == 'kg'], 'qtyUnitAbbr'] = 'm³'
+        self.export_data.loc[[i for i in self.export_data.index if self.export_data.loc[i, 'cmdCode'] == '4412' and self.export_data.loc[
+            i, 'qtyUnitAbbr'] == 'kg'], 'qtyUnitAbbr'] = 'm³'
+        # check there are no other instances of data in multiple units
+        data_in_kg = set(self.export_data.loc[self.export_data.qtyUnitAbbr == 'kg'].cmdCode)
+        data_in_L = set(self.export_data.loc[self.export_data.qtyUnitAbbr == 'l'].cmdCode)
+        data_in_m2 = set(self.export_data.loc[self.export_data.qtyUnitAbbr == 'm²'].cmdCode)
+        data_in_m3 = set(self.export_data.loc[self.export_data.qtyUnitAbbr == 'm³'].cmdCode)
+        data_in_u = set(self.export_data.loc[self.export_data.qtyUnitAbbr == 'u'].cmdCode)
+        assert not (data_in_kg & data_in_L & data_in_m2 & data_in_m3 & data_in_u)
+
+    def estimate_domestic_production(self):
+        """
+        Function estimates domestic production data
+        :return: self.domestic_data
+        """
+
+        self.logger.info("Estimating domestic production data...")
+
+        domestic_prod = pd.read_sql('SELECT * FROM "Domestic production"', con=self.trade_conn)
+
+        self.domestic_data = self.export_data.copy('deep')
+        self.domestic_data.loc[:, 'COMTRADE_reporter'] = self.domestic_data.reporterISO.copy()
+        # go from ISO3 codes to country codes for respective databases
+        self.export_data.reporterISO = [self.convert_ecoinvent_geos[i] for i in self.export_data.reporterISO]
+        self.domestic_data.reporterISO = [self.convert_ecoinvent_geos[i] for i in self.domestic_data.reporterISO]
+        self.domestic_data.COMTRADE_reporter = [self.convert_exiobase_geos[i] for i in
+                                                self.domestic_data.COMTRADE_reporter]
+
+        self.domestic_data = self.domestic_data.merge(
+            pd.DataFrame.from_dict(self.hs_class_to_exio, orient='index', columns=['cmdExio']).reset_index().rename(
+                columns={'index': 'cmdCode'}))
+        self.domestic_data = self.domestic_data.merge(domestic_prod, left_on=['COMTRADE_reporter', 'cmdExio'],
+                                                      right_on=['country', 'commodity'], how='left')
+        self.domestic_data.qty = (self.domestic_data.qty / (1 - self.domestic_data.loc[:, 'domestic use (%)'] / 100) *
+                                  self.domestic_data.loc[:, 'domestic use (%)'] / 100)
+        self.domestic_data.partnerISO = self.domestic_data.reporterISO
 
     def first_order_regionalization(self):
         """
@@ -500,6 +641,62 @@ class Regioinvent:
             # and register the production market
             self.regioinvent_in_wurst.append(global_market_activity)
 
+    def format_import_data(self):
+        """
+        Function extracts and formats import data from the trade database
+        :return: self.consumption_data
+        """
+
+        self.logger.info("Extracting and formatting import data from UN COMTRADE...")
+
+        self.import_data = pd.read_sql('SELECT * FROM "Import_data"', con=self.trade_conn)
+        # remove trade with "World"
+        self.import_data = self.import_data.drop(self.import_data[self.import_data.partnerISO == 'W00'].index)
+        # go from ISO3 codes to ISO2 codes
+        self.import_data.reporterISO = [self.convert_ecoinvent_geos[i] for i in self.import_data.reporterISO]
+        self.import_data.partnerISO = [self.convert_ecoinvent_geos[i] for i in self.import_data.partnerISO]
+        # check if AtlQty is defined whenever Qty is empty. If it is, then use that value.
+        self.import_data.loc[self.import_data.qty == 0, 'qty'] = self.import_data.loc[self.import_data.qty == 0, 'altQty']
+        # don't need AtlQty afterwards and drop zero values
+        self.import_data = self.import_data.drop('altQty', axis=1)
+        self.import_data = self.import_data.loc[self.import_data.qty != 0]
+        # convert data in different units
+        self.import_data.loc[self.import_data.loc[self.import_data.loc[:, 'qtyUnitAbbr'] == 'kg'].loc[
+                                 self.import_data.loc[:,
+                                 'cmdCode'] == '2804'].index, 'qty'] /= 0.08375  # kg/m3 density of hydrogen
+        self.import_data.loc[self.import_data.loc[self.import_data.loc[:, 'qtyUnitAbbr'] == 'kg'].loc[
+                                 self.import_data.loc[:,
+                                 'cmdCode'] == '280421'].index, 'qty'] /= 1.784  # kg/m3 density of argon
+        self.import_data.loc[self.import_data.loc[self.import_data.loc[:, 'qtyUnitAbbr'] == 'kg'].loc[
+                                 self.import_data.loc[:,
+                                 'cmdCode'] == '4412'].index, 'qty'] /= 700  # kg/m3 density of wood
+        # change unit name
+        self.import_data.loc[self.import_data.loc[self.import_data.loc[:, 'qtyUnitAbbr'] == 'kg'].loc[
+                                 self.import_data.loc[:, 'cmdCode'] == '2804'].index, 'qtyUnitAbbr'] = 'm³'
+        self.import_data.loc[self.import_data.loc[self.import_data.loc[:, 'qtyUnitAbbr'] == 'kg'].loc[
+                                 self.import_data.loc[:, 'cmdCode'] == '280421'].index, 'qtyUnitAbbr'] = 'm³'
+        self.import_data.loc[self.import_data.loc[self.import_data.loc[:, 'qtyUnitAbbr'] == 'kg'].loc[
+                                 self.import_data.loc[:, 'cmdCode'] == '4412'].index, 'qtyUnitAbbr'] = 'm³'
+        # check there are no other instances of data in multiple units
+        data_in_kg = set(self.import_data.loc[self.import_data.qtyUnitAbbr == 'kg'].cmdCode)
+        data_in_L = set(self.import_data.loc[self.import_data.qtyUnitAbbr == 'l'].cmdCode)
+        data_in_m2 = set(self.import_data.loc[self.import_data.qtyUnitAbbr == 'm²'].cmdCode)
+        data_in_m3 = set(self.import_data.loc[self.import_data.qtyUnitAbbr == 'm³'].cmdCode)
+        data_in_u = set(self.import_data.loc[self.import_data.qtyUnitAbbr == 'u'].cmdCode)
+        assert not (data_in_kg & data_in_L & data_in_m2 & data_in_m3 & data_in_u)
+
+        # remove artefacts of domestic trade from international trade data
+        self.import_data = self.import_data.drop(
+            self.import_data.loc[self.import_data.loc[:, 'reporterISO'] == self.import_data.loc[:, 'partnerISO']].index)
+        # concatenate import and domestic data
+        self.consumption_data = pd.concat([self.import_data, self.domestic_data.loc[:, self.import_data.columns]])
+        # get rid of infinite values
+        self.consumption_data.qty = self.consumption_data.qty.replace(np.inf, 0.0)
+
+        # save RAM
+        del self.import_data
+        del self.domestic_data
+
     def create_consumption_markets(self):
         """
         Function creating consumption markets for each regionalized process
@@ -618,6 +815,7 @@ class Regioinvent:
         consumption_markets_data = {(i['name'], i['location']): i for i in self.regioinvent_in_wurst if
                                     'consumption market' in i['name']}
 
+        # do it for regioinvent
         for process in self.regioinvent_in_wurst:
             if 'consumption market' not in process['name'] and 'production market' not in process['name']:
                 for exc in process['exchanges']:
@@ -722,6 +920,107 @@ class Regioinvent:
                                 exc['database'] = self.name_regionalized_biosphere_database
                                 exc['name'] = exc['name'] + ', ' + regio_iw_geo_mapping.loc[process['location'], 'acid']
                                 exc['input'] = (exc['database'], exc['code'])
+
+    def write_regioinvent_to_database(self):
+        """
+        Function write a dictionary of datasets to the brightway2 SQL database
+        """
+
+        # change regioinvent data from wurst to bw2 structure
+        regioinvent_data = {(i['database'], i['code']): i for i in self.regioinvent_in_wurst}
+
+        # recreate inputs in edges (exchanges)
+        for pr in regioinvent_data:
+            for exc in regioinvent_data[pr]['exchanges']:
+                try:
+                    exc['input']
+                except KeyError:
+                    exc['input'] = (exc['database'], exc['code'])
+        # wurst creates empty categories for activities, this creates an issue when you try to write the bw2 database
+        for pr in regioinvent_data:
+            try:
+                del regioinvent_data[pr]['categories']
+            except KeyError:
+                pass
+
+        # write regioinvent database
+        bw2.Database(self.regioinvent_database_name).write(regioinvent_data)
+
+    def connect_ecoinvent_to_regioinvent(self):
+        """
+        Now that regioinvent exists, we can make ecoinvent use regioinvent processes to further deepen the
+        regionalization. Only countries and sub-countries are connected to regioinvent, simply because in regioinvent
+        we do not have consumption mixes for the different regions of ecoinvent (e.g., RER, RAS, etc.).
+        However, Swiss processes are not affected, as ecoinvent was already tailored for the Swiss case.
+        I am not sure regioinvent would bring more precision in that specific case.
+        """
+
+        self.logger.info("Connecting ecoinvent to regioinvent processes...")
+
+        # notice that here we are directly manipulating (through bw2) the already-written ecoinvent database
+
+        consumption_markets_data = {(i['name'], i['location']): i for i in self.regioinvent_in_wurst if
+                                    'consumption market' in i['name']}
+
+        # first we connect ecoinvent to consumtpion markets of regioinvent
+        for process in bw2.Database(self.name_ei_with_regionalized_biosphere):
+            location = None
+            # for countries (e.g., CA)
+            if process.as_dict()['location'] in self.country_to_ecoinvent_regions.keys():
+                location = process.as_dict()['location']
+            # for sub-countries (e.g., CA-QC)
+            elif process.as_dict()['location'].split('-')[0] in self.country_to_ecoinvent_regions.keys():
+                location = process.as_dict()['location'].split('-')[0]
+            if location and location != 'CH':
+                for exc in process.technosphere():
+                    if exc.as_dict()['product'] in self.eco_to_hs_class.keys():
+                        exc.as_dict()['name'] = 'consumption market for ' + exc.as_dict()['product']
+                        exc.as_dict()['location'] = location
+                        if ('consumption market for ' + exc.as_dict()['product'], location) in consumption_markets_data.keys():
+                            exc.as_dict()['database'] = (consumption_markets_data[
+                                ('consumption market for ' + exc.as_dict()['product'], location)]['database'])
+                            exc.as_dict()['code'] = (consumption_markets_data[
+                                ('consumption market for ' + exc.as_dict()['product'], location)]['code'])
+                        else:
+                            exc.as_dict()['database'] = (consumption_markets_data[
+                                ('consumption market for ' + exc.as_dict()['product'], 'RoW')]['database'])
+                            exc.as_dict()['code'] = (consumption_markets_data[
+                                ('consumption market for ' + exc.as_dict()['product'], 'RoW')]['code'])
+                        exc.as_dict()['input'] = (exc.as_dict()['database'], exc.as_dict()['code'])
+                        exc.save()
+
+        # aggregating duplicate inputs (e.g., multiple consumption markets RoW callouts)
+        for process in bw2.Database(self.name_ei_with_regionalized_biosphere):
+            duplicates = [item for item, count in collections.Counter(
+                [(i.as_dict()['input'], i.as_dict()['name'], i.as_dict()['product'],
+                  i.as_dict()['location'], i.as_dict()['database'], i.as_dict()['code']) for i
+                 in process.technosphere()]).items() if count > 1]
+
+            for duplicate in duplicates:
+                total = sum([i['amount'] for i in process.technosphere() if i['input'] == duplicate[0]])
+                [i.delete() for i in process.technosphere() if i['input'] == duplicate[0]]
+                new_exc = process.new_exchange(amount=total, type='technosphere', input=duplicate[0],
+                                               name=duplicate[1], product=duplicate[2], location=duplicate[3],
+                                               database=duplicate[4], code=duplicate[5])
+                new_exc.save()
+
+        # we also change production processes of ecoinvent for regionalized production processes of regioinvent
+        regio_dict = {(i.as_dict()['reference product'], i.as_dict()['name'], i.as_dict()['location']): i for i in
+                      bw2.Database(self.regioinvent_database_name)}
+
+        for process in bw2.Database(self.name_ei_with_regionalized_biosphere):
+            for exc in process.technosphere():
+                if exc.as_dict()['product'] in self.eco_to_hs_class.keys():
+                    # same thing, we don't touch Swiss processes
+                    if exc.as_dict()['location'] not in ['RoW', 'CH']:
+                        try:
+                            exc.as_dict()['database'] = self.regioinvent_database_name
+                            exc.as_dict()['code'] = regio_dict[
+                                (exc.as_dict()['product'], exc.as_dict()['name'], exc.as_dict()['location'])].as_dict()[
+                                'code']
+                            exc.as_dict()['input'] = (exc.as_dict()['database'], exc.as_dict()['code'])
+                        except KeyError:
+                            pass
 
     # -------------------------------------------Supporting functions---------------------------------------------------
 
@@ -1026,161 +1325,6 @@ class Regioinvent:
         else:
             for exc in ws.technosphere(process, ws.contains("name", input_name)):
                 return True
-
-    def format_export_data(self):
-        """
-        Function extracts and formats the export data from the trade database
-        :return: self.export_data
-        """
-
-        self.logger.info("Extracting and formatting export data from UN COMTRADE...")
-
-        self.export_data = pd.read_sql('SELECT * FROM "Export_data"', con=self.trade_conn)
-        # only keep total export values (no need for destination detail)
-        self.export_data = self.export_data[self.export_data.partnerISO == 'W00']
-        # check if AtlQty is defined whenever Qty is empty. If it is, then use that value.
-        self.export_data.loc[self.export_data.qty == 0, 'qty'] = self.export_data.loc[self.export_data.qty == 0, 'altQty']
-        # don't need AtlQty afterwards and drop zero values
-        self.export_data = self.export_data.drop('altQty', axis=1)
-        self.export_data = self.export_data.loc[self.export_data.qty != 0]
-        # DEAL WITH UNITS IN TRADE DATA
-        # remove mistakes in units from data reporter
-        self.export_data = self.export_data.drop([i for i in self.export_data.index if (
-                (self.export_data.loc[i, 'cmdCode'] == '7005' and self.export_data.loc[i, 'qtyUnitAbbr'] == 'kg') or
-                (self.export_data.loc[i, 'cmdCode'] == '850720' and self.export_data.loc[i, 'qtyUnitAbbr'] in ['kg','ce/el']) or
-                (self.export_data.loc[i, 'cmdCode'] == '280421' and self.export_data.loc[i, 'qtyUnitAbbr'] == 'u') or
-                (self.export_data.loc[i, 'cmdCode'] == '280440' and self.export_data.loc[i, 'qtyUnitAbbr'] == 'u'))])
-        # convert data in different units
-        self.export_data.loc[[i for i in self.export_data.index if self.export_data.loc[i, 'cmdCode'] == '2804' and self.export_data.loc[
-            i, 'qtyUnitAbbr'] == 'kg'], 'qty'] /= 0.08375  # kg/m3 density of hydrogen
-        self.export_data.loc[[i for i in self.export_data.index if self.export_data.loc[i, 'cmdCode'] == '280421' and self.export_data.loc[
-            i, 'qtyUnitAbbr'] == 'kg'], 'qty'] /= 1.784  # kg/m3 density of argon
-        self.export_data.loc[[i for i in self.export_data.index if self.export_data.loc[i, 'cmdCode'] == '280429' and self.export_data.loc[
-            i, 'qtyUnitAbbr'] == 'kg'], 'qty'] /= 0.166  # kg/m3 density of helium
-        self.export_data.loc[[i for i in self.export_data.index if self.export_data.loc[i, 'cmdCode'] == '4412' and self.export_data.loc[
-            i, 'qtyUnitAbbr'] == 'kg'], 'qty'] /= 700  # kg/m3 density of wood
-        # change unit name
-        self.export_data.loc[[i for i in self.export_data.index if self.export_data.loc[i, 'cmdCode'] == '2804' and self.export_data.loc[
-            i, 'qtyUnitAbbr'] == 'kg'], 'qtyUnitAbbr'] = 'm³'
-        self.export_data.loc[[i for i in self.export_data.index if self.export_data.loc[i, 'cmdCode'] == '280421' and self.export_data.loc[
-            i, 'qtyUnitAbbr'] == 'kg'], 'qtyUnitAbbr'] = 'm³'
-        self.export_data.loc[[i for i in self.export_data.index if self.export_data.loc[i, 'cmdCode'] == '280429' and self.export_data.loc[
-            i, 'qtyUnitAbbr'] == 'kg'], 'qtyUnitAbbr'] = 'm³'
-        self.export_data.loc[[i for i in self.export_data.index if self.export_data.loc[i, 'cmdCode'] == '4412' and self.export_data.loc[
-            i, 'qtyUnitAbbr'] == 'kg'], 'qtyUnitAbbr'] = 'm³'
-        # check there are no other instances of data in multiple units
-        data_in_kg = set(self.export_data.loc[self.export_data.qtyUnitAbbr == 'kg'].cmdCode)
-        data_in_L = set(self.export_data.loc[self.export_data.qtyUnitAbbr == 'l'].cmdCode)
-        data_in_m2 = set(self.export_data.loc[self.export_data.qtyUnitAbbr == 'm²'].cmdCode)
-        data_in_m3 = set(self.export_data.loc[self.export_data.qtyUnitAbbr == 'm³'].cmdCode)
-        data_in_u = set(self.export_data.loc[self.export_data.qtyUnitAbbr == 'u'].cmdCode)
-        assert not (data_in_kg & data_in_L & data_in_m2 & data_in_m3 & data_in_u)
-
-    def estimate_domestic_production(self):
-        """
-        Function estimates domestic production data
-        :return: self.domestic_data
-        """
-
-        self.logger.info("Estimating domestic production data...")
-
-        domestic_prod = pd.read_sql('SELECT * FROM "Domestic production"', con=self.trade_conn)
-
-        self.domestic_data = self.export_data.copy('deep')
-        self.domestic_data.loc[:, 'COMTRADE_reporter'] = self.domestic_data.reporterISO.copy()
-        # go from ISO3 codes to country codes for respective databases
-        self.export_data.reporterISO = [self.convert_ecoinvent_geos[i] for i in self.export_data.reporterISO]
-        self.domestic_data.reporterISO = [self.convert_ecoinvent_geos[i] for i in self.domestic_data.reporterISO]
-        self.domestic_data.COMTRADE_reporter = [self.convert_exiobase_geos[i] for i in
-                                                self.domestic_data.COMTRADE_reporter]
-
-        self.domestic_data = self.domestic_data.merge(
-            pd.DataFrame.from_dict(self.hs_class_to_exio, orient='index', columns=['cmdExio']).reset_index().rename(
-                columns={'index': 'cmdCode'}))
-        self.domestic_data = self.domestic_data.merge(domestic_prod, left_on=['COMTRADE_reporter', 'cmdExio'],
-                                                      right_on=['country', 'commodity'], how='left')
-        self.domestic_data.qty = (self.domestic_data.qty / (1 - self.domestic_data.loc[:, 'domestic use (%)'] / 100) *
-                                  self.domestic_data.loc[:, 'domestic use (%)'] / 100)
-        self.domestic_data.partnerISO = self.domestic_data.reporterISO
-
-    def format_import_data(self):
-        """
-        Function extracts and formats import data from the trade database
-        :return: self.consumption_data
-        """
-
-        self.logger.info("Extracting and formatting import data from UN COMTRADE...")
-
-        self.import_data = pd.read_sql('SELECT * FROM "Import_data"', con=self.trade_conn)
-        # remove trade with "World"
-        self.import_data = self.import_data.drop(self.import_data[self.import_data.partnerISO == 'W00'].index)
-        # go from ISO3 codes to ISO2 codes
-        self.import_data.reporterISO = [self.convert_ecoinvent_geos[i] for i in self.import_data.reporterISO]
-        self.import_data.partnerISO = [self.convert_ecoinvent_geos[i] for i in self.import_data.partnerISO]
-        # check if AtlQty is defined whenever Qty is empty. If it is, then use that value.
-        self.import_data.loc[self.import_data.qty == 0, 'qty'] = self.import_data.loc[self.import_data.qty == 0, 'altQty']
-        # don't need AtlQty afterwards and drop zero values
-        self.import_data = self.import_data.drop('altQty', axis=1)
-        self.import_data = self.import_data.loc[self.import_data.qty != 0]
-        # convert data in different units
-        self.import_data.loc[self.import_data.loc[self.import_data.loc[:, 'qtyUnitAbbr'] == 'kg'].loc[
-                                 self.import_data.loc[:,
-                                 'cmdCode'] == '2804'].index, 'qty'] /= 0.08375  # kg/m3 density of hydrogen
-        self.import_data.loc[self.import_data.loc[self.import_data.loc[:, 'qtyUnitAbbr'] == 'kg'].loc[
-                                 self.import_data.loc[:,
-                                 'cmdCode'] == '280421'].index, 'qty'] /= 1.784  # kg/m3 density of argon
-        self.import_data.loc[self.import_data.loc[self.import_data.loc[:, 'qtyUnitAbbr'] == 'kg'].loc[
-                                 self.import_data.loc[:,
-                                 'cmdCode'] == '4412'].index, 'qty'] /= 700  # kg/m3 density of wood
-        # change unit name
-        self.import_data.loc[self.import_data.loc[self.import_data.loc[:, 'qtyUnitAbbr'] == 'kg'].loc[
-                                 self.import_data.loc[:, 'cmdCode'] == '2804'].index, 'qtyUnitAbbr'] = 'm³'
-        self.import_data.loc[self.import_data.loc[self.import_data.loc[:, 'qtyUnitAbbr'] == 'kg'].loc[
-                                 self.import_data.loc[:, 'cmdCode'] == '280421'].index, 'qtyUnitAbbr'] = 'm³'
-        self.import_data.loc[self.import_data.loc[self.import_data.loc[:, 'qtyUnitAbbr'] == 'kg'].loc[
-                                 self.import_data.loc[:, 'cmdCode'] == '4412'].index, 'qtyUnitAbbr'] = 'm³'
-        # check there are no other instances of data in multiple units
-        data_in_kg = set(self.import_data.loc[self.import_data.qtyUnitAbbr == 'kg'].cmdCode)
-        data_in_L = set(self.import_data.loc[self.import_data.qtyUnitAbbr == 'l'].cmdCode)
-        data_in_m2 = set(self.import_data.loc[self.import_data.qtyUnitAbbr == 'm²'].cmdCode)
-        data_in_m3 = set(self.import_data.loc[self.import_data.qtyUnitAbbr == 'm³'].cmdCode)
-        data_in_u = set(self.import_data.loc[self.import_data.qtyUnitAbbr == 'u'].cmdCode)
-        assert not (data_in_kg & data_in_L & data_in_m2 & data_in_m3 & data_in_u)
-
-        # remove artefacts of domestic trade from international trade data
-        self.import_data = self.import_data.drop(
-            self.import_data.loc[self.import_data.loc[:, 'reporterISO'] == self.import_data.loc[:, 'partnerISO']].index)
-        # concatenate import and domestic data
-        self.consumption_data = pd.concat([self.import_data, self.domestic_data.loc[:, self.import_data.columns]])
-        # get rid of infinite values
-        self.consumption_data.qty = self.consumption_data.qty.replace(np.inf, 0.0)
-
-        # save RAM
-        del self.import_data
-        del self.domestic_data
-
-    def write_to_database(self):
-        """
-        Function write a dictionary of datasets to the brightway2 SQL database
-        """
-        # change to bw2 structure
-        regioinvent_data = {(i['database'], i['code']): i for i in self.regioinvent_in_wurst}
-
-        # recreate inputs in edges (exchanges)
-        for pr in regioinvent_data:
-            for exc in regioinvent_data[pr]['exchanges']:
-                try:
-                    exc['input']
-                except KeyError:
-                    exc['input'] = (exc['database'], exc['code'])
-        # wurst creates empty categories for activities, this creates an issue when you try to write the bw2 database
-        for pr in regioinvent_data:
-            try:
-                del regioinvent_data[pr]['categories']
-            except KeyError:
-                pass
-
-        bw2.Database(self.regioinvent_database_name).write(regioinvent_data)
 
 
 def clean_up_dataframe(df):
