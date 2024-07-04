@@ -27,14 +27,16 @@ from tqdm import tqdm
 
 class Regioinvent:
     def __init__(self, trade_database_path, regioinvent_database_name, bw_project_name, ecoinvent_database_name,
-                 regionalized_elementary_flows=True):
+                 regionalized_elementary_flows=True, cutoff=0.95):
         """
-        :param trade_database_path: [str] the path to the trade database, the latter should be downloaded from Zenodo:
-                                        https://doi.org/...
-        :param regioinvent_database_name: [str] the name to be given to the created regionalized ecoinvent database
-        :param bw_project_name: [str] the name of a brightway2 project containing an ecoinvent database
-        :param ecoinvent_database_name: [str] the name of the ecoinvent database within the brightway2 project
+        :param trade_database_path:         [str] the path to the trade database, the latter should be downloaded from Zenodo:
+                                            https://doi.org/10.5281/zenodo.11583815
+        :param regioinvent_database_name:   [str] the name to be given to the created regionalized ecoinvent database
+        :param bw_project_name:             [str] the name of a brightway2 project containing an ecoinvent database
+        :param ecoinvent_database_name:     [str] the name of the ecoinvent database within the brightway2 project
         :param regionalized_elementary_flows: [boolean] should elementary flows be regionalized or not?
+        :param cutoff:                      [float] cut-off up to which countries will be covered as separate geographies (not in RoW).
+                                            A higher cut-off means a bigger resulting database (careful it's not linear)
         """
 
         # set up logging tool
@@ -56,6 +58,7 @@ class Regioinvent:
         self.ecoinvent_database_name = ecoinvent_database_name
         self.name_ei_with_regionalized_biosphere = ecoinvent_database_name + ' regionalized'
         self.name_regionalized_biosphere_database = 'biosphere3_regionalized_flows'
+        self.cutoff = cutoff
         self.regio_bio = regionalized_elementary_flows
         self.trade_conn = sqlite3.connect(trade_database_path)
         self.ecoinvent_conn = sqlite3.connect(bw2.Database(self.regioinvent_database_name).filepath_processed().split(
@@ -443,8 +446,8 @@ class Regioinvent:
             # calculate the average export volume for each country
             cmd_export_data = cmd_export_data.groupby('reporterISO').agg({'qty': 'mean'})
             exporters = (cmd_export_data.qty / cmd_export_data.qty.sum()).sort_values(ascending=False)
-            # only keep the countries representing 99% of global exports of the product and create a RoW from that
-            limit = exporters.index.get_loc(exporters[exporters.cumsum() > 0.95].index[0]) + 1
+            # only keep the countries representing XX% of global exports of the product and create a RoW from that
+            limit = exporters.index.get_loc(exporters[exporters.cumsum() > self.cutoff].index[0]) + 1
             remainder = exporters.iloc[limit:].sum()
             exporters = exporters.iloc[:limit]
             if 'RoW' in exporters.index:
@@ -677,6 +680,10 @@ class Regioinvent:
                                  self.import_data.loc[:, 'cmdCode'] == '280421'].index, 'qtyUnitAbbr'] = 'm³'
         self.import_data.loc[self.import_data.loc[self.import_data.loc[:, 'qtyUnitAbbr'] == 'kg'].loc[
                                  self.import_data.loc[:, 'cmdCode'] == '4412'].index, 'qtyUnitAbbr'] = 'm³'
+        # correct mistake for the trade of natural gas (271121) between Mexico and the US in 2021, 2022 and 2023
+        self.import_data.loc[[i for i in self.import_data.index if self.import_data.loc[i, 'cmdCode'] == '271121' and
+                              self.import_data.loc[i, 'reporterISO'] == 'MEX'
+                              and self.import_data.loc[i, 'refYear'] in [2021, 2022, 2023]], 'qty'] *= 0.000712 # kg/L density of natural gas
         # check there are no other instances of data in multiple units
         data_in_kg = set(self.import_data.loc[self.import_data.qtyUnitAbbr == 'kg'].cmdCode)
         data_in_L = set(self.import_data.loc[self.import_data.qtyUnitAbbr == 'l'].cmdCode)
@@ -720,8 +727,8 @@ class Regioinvent:
             # change to relative
             importers = (cmd_consumption_data.groupby(level=0).sum() /
                          cmd_consumption_data.sum().sum()).sort_values(by='qty', ascending=False)
-            # only keep importers till the 99% of total imports
-            limit = importers.index.get_loc(importers[importers.cumsum() > 0.95].dropna().index[0]) + 1
+            # only keep importers till the cut-off of total imports
+            limit = importers.index.get_loc(importers[importers.cumsum() > self.cutoff].dropna().index[0]) + 1
             # aggregate the rest
             remainder = cmd_consumption_data.loc[importers.index[limit:]].groupby(level=1).sum()
             cmd_consumption_data = cmd_consumption_data.loc[importers.index[:limit]]
@@ -1278,30 +1285,80 @@ class Regioinvent:
                                           ws.equals("database", self.name_ei_with_regionalized_biosphere),
                                           ws.contains("name", "market for"))
 
-        # extracting amount of heat of country within region heat market process
-        heat_exchanges = {}
-        for ds in region_heat_process:
-            for exc in ws.technosphere(ds, *[ws.equals("product", heat_flow),
-                                             ws.equals("location", export_country)]):
-                heat_exchanges[exc['name']] = exc['amount']
-        # make it relative amounts
-        heat_exchanges = {k: v / sum(heat_exchanges.values()) for k, v in heat_exchanges.items()}
-        # scale the relative amount to the qty of heat of process
-        heat_exchanges = {k: v * qty_of_heat for k, v in heat_exchanges.items()}
+        # countries with sub-region markets of heat require a special treatment
+        if export_country in ['CA', 'US', 'CN', 'BR', 'IN']:
+            region_heat_process = ws.get_many(self.ei_wurst,
+                                              ws.equals("reference product", heat_flow),
+                                              ws.equals("location", region_heat),
+                                              ws.equals("database", self.name_ei_with_regionalized_biosphere),
+                                              ws.either(ws.contains("name", "market for"),
+                                                        ws.contains("name", "market group for")))
 
-        # add regionalized exchange of heat
-        for heat_exc in heat_exchanges.keys():
+            # extracting amount of heat of country within region heat market process
+            heat_exchanges = {}
+            for ds in region_heat_process:
+                for exc in ws.technosphere(ds, *[ws.equals("product", heat_flow),
+                                                 ws.contains("location", export_country)]):
+                    heat_exchanges[exc['name'], exc['location']] = exc['amount']
 
-            process['exchanges'].append({"amount": heat_exchanges[heat_exc],
-                                           "product": heat_flow,
-                                           "name": heat_exc,
-                                           "location": export_country,
-                                           "unit": unit_name,
-                                           "database": self.regioinvent_database_name,
-                                           "type": "technosphere",
-                                           "input": (self.ei_in_dict[(heat_flow, export_country, heat_exc)]['database'],
-                                                     self.ei_in_dict[(heat_flow, export_country, heat_exc)]['code']),
-                                           "output": (process['database'], process['code'])})
+            # special case for some Quebec heat flows
+            if export_country == 'CA' and heat_flow != 'heat, central or small-scale, other than natural gas':
+                global_heat_process = ws.get_one(self.ei_wurst,
+                                                 ws.equals("reference product", heat_flow),
+                                                 ws.equals("location", 'GLO'),
+                                                 ws.equals("database", self.name_ei_with_regionalized_biosphere),
+                                                 ws.either(ws.contains("name", "market for"),
+                                                           ws.contains("name", "market group for")))
+
+                heat_exchanges = {k: v * [i['amount'] for i in global_heat_process['exchanges'] if
+                                          i['location'] == 'RoW'][0] for k, v in heat_exchanges.items()}
+                heat_exchanges[
+                    ([i for i in global_heat_process['exchanges'] if i['location'] == 'CA-QC'][0]['name'], 'CA-QC')] = (
+                    [i for i in global_heat_process['exchanges'] if i['location'] == 'CA-QC'][0]['amount'])
+            # make it relative amounts
+            heat_exchanges = {k: v / sum(heat_exchanges.values()) for k, v in heat_exchanges.items()}
+            # scale the relative amount to the qty of heat of process
+            heat_exchanges = {k: v * qty_of_heat for k, v in heat_exchanges.items()}
+
+            # add regionalized exchange of heat
+            for heat_exc in heat_exchanges.keys():
+                process['exchanges'].append({"amount": heat_exchanges[heat_exc],
+                                             "product": heat_flow,
+                                             "name": heat_exc[0],
+                                             "location": heat_exc[1],
+                                             "unit": unit_name,
+                                             "database": self.regioinvent_database_name,
+                                             "type": "technosphere",
+                                             "input": (
+                                             self.ei_in_dict[(heat_flow, heat_exc[1], heat_exc[0])]['database'],
+                                             self.ei_in_dict[(heat_flow, heat_exc[1], heat_exc[0])]['code']),
+                                             "output": (process['database'], process['code'])})
+
+        else:
+            # extracting amount of heat of country within region heat market process
+            heat_exchanges = {}
+            for ds in region_heat_process:
+                for exc in ws.technosphere(ds, *[ws.equals("product", heat_flow),
+                                                 ws.equals("location", export_country)]):
+                    heat_exchanges[exc['name']] = exc['amount']
+            # make it relative amounts
+            heat_exchanges = {k: v / sum(heat_exchanges.values()) for k, v in heat_exchanges.items()}
+            # scale the relative amount to the qty of heat of process
+            heat_exchanges = {k: v * qty_of_heat for k, v in heat_exchanges.items()}
+
+            # add regionalized exchange of heat
+            for heat_exc in heat_exchanges.keys():
+
+                process['exchanges'].append({"amount": heat_exchanges[heat_exc],
+                                               "product": heat_flow,
+                                               "name": heat_exc,
+                                               "location": export_country,
+                                               "unit": unit_name,
+                                               "database": self.regioinvent_database_name,
+                                               "type": "technosphere",
+                                               "input": (self.ei_in_dict[(heat_flow, export_country, heat_exc)]['database'],
+                                                         self.ei_in_dict[(heat_flow, export_country, heat_exc)]['code']),
+                                               "output": (process['database'], process['code'])})
 
         return process
 
