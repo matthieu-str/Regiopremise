@@ -41,6 +41,8 @@ brightway2.5).
 You can then follow the steps presented in the [demo.ipynb](https://github.com/CIRAIG/Regioinvent/tree/master/doc/demo.ipynb) 
 Jupyter notebook.
 
+Required python version: 3.11
+
 ## How to use?
 Once the regionalized version of ecoinvent is created, you can perform your LCAs either through brightway2 or its GUI 
 activity-browser. <br> There are currently no support for other LCA software, although nothing stops you from exporting a 
