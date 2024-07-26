@@ -317,11 +317,11 @@ class Regioinvent:
         regionalize it later on. The goal is to always keep a "pristine" ecoinvent version.
         """
 
-        # and change the database name everywhere
+        # change the database name everywhere
         for pr in self.ei_wurst:
             pr['database'] = self.name_ei_with_regionalized_biosphere
             for exc in pr['exchanges']:
-                if exc['type'] == 'technosphere':
+                if exc['type'] in ['technosphere', 'production']:
                     exc['input'] = (self.name_ei_with_regionalized_biosphere, exc['code'])
                     exc['database'] = self.name_ei_with_regionalized_biosphere
 
@@ -571,6 +571,7 @@ class Regioinvent:
                 regio_process['exchanges'][0]['code'] = regio_process['code']
                 regio_process['exchanges'][0]['database'] = regio_process['database']
                 regio_process['exchanges'][0]['location'] = regio_process['location']
+                regio_process['exchanges'][0]['input'] = (regio_process['database'], regio_process['code'])
                 # input the regionalized process into the global production market
                 global_market_activity['exchanges'].append(
                     {"amount": exporters.loc[export_country] * self.distribution_technologies[product][activity],
@@ -1406,18 +1407,14 @@ class Regioinvent:
                               'water, completely softened', 'tap water', 'wastewater, average', 'wastewater, unpolluted']
 
         # here we get all regions of processes using the identified technosphere water flows
-        used_regions = []
-        for ds in self.ei_wurst:
-            for flow in techno_water_flows:
-                for exc in ws.technosphere(ds, ws.equals("product", flow)):
-                    used_regions.append(ds['location'])
+        used_regions = list(magic_plumbering_geographies.keys())
 
         already_existing = {i: [] for i in techno_water_flows}
         # now we check if some of those already exist in ecoinvent
         for techno in techno_water_flows:
             for region in used_regions:
                 if (techno, region, 'market for ' + techno) in self.ei_in_dict.keys() or (
-                techno, region, 'market group for ' + techno) in self.ei_in_dict.keys():
+                        techno, region, 'market group for ' + techno) in self.ei_in_dict.keys():
                     already_existing[techno].append(region)
 
         already_existing = {k: set(already_existing[k]) for k, v in already_existing.items()}
@@ -1506,7 +1503,7 @@ class Regioinvent:
                         production_ds['exchanges'][0]['database'] = self.name_ei_with_regionalized_biosphere
                         production_ds['exchanges'][0]['location'] = production_ds['location']
                         production_ds['exchanges'][0]['input'] = (
-                        self.name_ei_with_regionalized_biosphere, production_ds['code'])
+                            self.name_ei_with_regionalized_biosphere, production_ds['code'])
                         self.ei_wurst.append(production_ds)
 
             if techno in ['wastewater, average', 'wastewater, unpolluted']:
@@ -1518,7 +1515,7 @@ class Regioinvent:
                         else:
                             try:
                                 production_ds = copy.deepcopy(self.ei_in_dict[(
-                                techno, 'Europe without Switzerland', 'treatment of ' + techno + ', wastewater treatment')])
+                                    techno, 'Europe without Switzerland', 'treatment of ' + techno + ', wastewater treatment')])
                             except KeyError:
                                 production_ds = copy.deepcopy(
                                     self.ei_in_dict[(techno, 'RoW', 'treatment of ' + techno + ', wastewater treatment')])
@@ -1527,8 +1524,7 @@ class Regioinvent:
                         name = production_ds['name']
                         product = production_ds['reference product']
                         original_region = production_ds['location']
-                        production_ds[
-                            'comment'] = f'This process is a regionalized adaptation of the following process of the ecoinvent database: {name} | {product} | {original_region}. No amount values were modified in the regionalization process, only their origin.'
+                        production_ds['comment'] = f'This process is a regionalized adaptation of the following process of the ecoinvent database: {name} | {product} | {original_region}. No amount values were modified in the regionalization process, only their origin.'
                         production_ds['location'] = region
                         production_ds['code'] = uuid.uuid4().hex
                         production_ds['database'] = self.name_ei_with_regionalized_biosphere
@@ -1537,7 +1533,7 @@ class Regioinvent:
                         production_ds['exchanges'][0]['database'] = self.name_ei_with_regionalized_biosphere
                         production_ds['exchanges'][0]['location'] = production_ds['location']
                         production_ds['exchanges'][0]['input'] = (
-                        self.name_ei_with_regionalized_biosphere, production_ds['code'])
+                            self.name_ei_with_regionalized_biosphere, production_ds['code'])
                         self.ei_wurst.append(production_ds)
 
             if techno == 'irrigation':
@@ -1566,8 +1562,7 @@ class Regioinvent:
                             name = production_ds['name']
                             product = production_ds['reference product']
                             original_region = production_ds['location']
-                            production_ds[
-                                'comment'] = f'This process is a regionalized adaptation of the following process of the ecoinvent database: {name} | {product} | {original_region}. No amount values were modified in the regionalization process, only their origin.'
+                            production_ds['comment'] = f'This process is a regionalized adaptation of the following process of the ecoinvent database: {name} | {product} | {original_region}. No amount values were modified in the regionalization process, only their origin.'
                             production_ds['location'] = region
                             production_ds['code'] = uuid.uuid4().hex
                             production_ds['database'] = self.name_ei_with_regionalized_biosphere
@@ -1576,7 +1571,7 @@ class Regioinvent:
                             production_ds['exchanges'][0]['database'] = self.name_ei_with_regionalized_biosphere
                             production_ds['exchanges'][0]['location'] = production_ds['location']
                             production_ds['exchanges'][0]['input'] = (
-                            self.name_ei_with_regionalized_biosphere, production_ds['code'])
+                                self.name_ei_with_regionalized_biosphere, production_ds['code'])
 
                             self.ei_wurst.append(production_ds)
 
@@ -1615,8 +1610,7 @@ class Regioinvent:
                             name = production_ds['name']
                             product = production_ds['reference product']
                             original_region = production_ds['location']
-                            production_ds[
-                                'comment'] = f'This process is a regionalized adaptation of the following process of the ecoinvent database: {name} | {product} | {original_region}. No amount values were modified in the regionalization process, only their origin.'
+                            production_ds['comment'] = f'This process is a regionalized adaptation of the following process of the ecoinvent database: {name} | {product} | {original_region}. No amount values were modified in the regionalization process, only their origin.'
                             production_ds['location'] = region
                             production_ds['code'] = uuid.uuid4().hex
                             production_ds['database'] = self.name_ei_with_regionalized_biosphere
@@ -1625,7 +1619,7 @@ class Regioinvent:
                             production_ds['exchanges'][0]['database'] = self.name_ei_with_regionalized_biosphere
                             production_ds['exchanges'][0]['location'] = production_ds['location']
                             production_ds['exchanges'][0]['input'] = (
-                            self.name_ei_with_regionalized_biosphere, production_ds['code'])
+                                self.name_ei_with_regionalized_biosphere, production_ds['code'])
                             self.ei_wurst.append(production_ds)
 
         # need to re-extract the dictionary because we added new processes to ei_wurst
@@ -1646,12 +1640,12 @@ class Regioinvent:
                                 except KeyError:
                                     if exc['name'] == 'market for tap water':
                                         replace_process = self.ei_in_dict[(
-                                        exc['product'], magic_plumbering_geographies[process['location']][1],
-                                        'market group for tap water')]
+                                            exc['product'], magic_plumbering_geographies[process['location']][1],
+                                            'market group for tap water')]
                                     if exc['name'] == 'market group for tap water':
                                         replace_process = self.ei_in_dict[(
-                                        exc['product'], magic_plumbering_geographies[process['location']][1],
-                                        'market for tap water')]
+                                            exc['product'], magic_plumbering_geographies[process['location']][1],
+                                            'market for tap water')]
                                 exc['code'] = replace_process['code']
                                 exc['name'] = replace_process['name']
                                 exc['product'] = replace_process['reference product']
