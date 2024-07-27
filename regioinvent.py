@@ -643,6 +643,10 @@ class Regioinvent:
                 global_market_activity['exchanges'].append({
                     'amount': self.transportation_modes[product][transportation_mode],
                     'type': 'technosphere',
+                    'database': self.name_ei_with_regionalized_biosphere,
+                    'code': transportation_mode,
+                    'product': bw2.Database(self.name_ei_with_regionalized_biosphere).get(
+                        transportation_mode).as_dict()['reference product'],
                     'input': (self.name_ei_with_regionalized_biosphere, transportation_mode)
                 })
             # and register the production market
@@ -823,10 +827,43 @@ class Regioinvent:
 
         self.logger.info("Performing second order regionalization...")
 
+        if self.regio_bio:
+            with open(pkg_resources.resource_filename(__name__, '/Data/magic_plumbering_geographies.json'), 'r') as f:
+                magic_plumbering_geographies = json.load(f)
+            techno_water_flows = ['irrigation', 'water, deionised', 'water, ultrapure', 'water, decarbonised',
+                                  'water, completely softened', 'tap water', 'wastewater, average',
+                                  'wastewater, unpolluted']
+            # connect to water flows created in regioinvent specifically
+            for process in self.regioinvent_in_wurst:
+                if 'consumption market' not in process['name'] and 'production market' not in process['name']:
+                    for exc in process['exchanges']:
+                        if exc['type'] == 'technosphere':
+                            if exc['product'] in techno_water_flows:
+                                if (not (exc['product'] == 'water, decarbonised' and
+                                         exc['name'] == 'diethyl ether production') and not (
+                                        exc['product'] == 'water, ultrapure' and process['location'] == 'CA-QC')):
+                                    try:
+                                        replace_process = self.ei_in_dict[
+                                            (exc['product'], magic_plumbering_geographies[process['location']][1],
+                                             exc['name'])]
+                                    except KeyError:
+                                        if exc['name'] == 'market for tap water':
+                                            replace_process = self.ei_in_dict[(
+                                                exc['product'], magic_plumbering_geographies[process['location']][1],
+                                                'market group for tap water')]
+                                        if exc['name'] == 'market group for tap water':
+                                            replace_process = self.ei_in_dict[(
+                                                exc['product'], magic_plumbering_geographies[process['location']][1],
+                                                'market for tap water')]
+                                    exc['code'] = replace_process['code']
+                                    exc['name'] = replace_process['name']
+                                    exc['product'] = replace_process['reference product']
+                                    exc['input'] = (self.name_ei_with_regionalized_biosphere, exc['code'])
+
         consumption_markets_data = {(i['name'], i['location']): i for i in self.regioinvent_in_wurst if
                                     'consumption market' in i['name']}
 
-        # do it for regioinvent
+        # connect processes together
         for process in self.regioinvent_in_wurst:
             if 'consumption market' not in process['name'] and 'production market' not in process['name']:
                 for exc in process['exchanges']:
