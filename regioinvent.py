@@ -1121,7 +1121,7 @@ class Regioinvent:
                                            "name": electricity_activity_name,
                                            "location": electricity_region,
                                            "unit": unit_name,
-                                           "database": self.regioinvent_database_name,
+                                           "database": process['database'],
                                            "type": "technosphere",
                                            "input": (self.name_ei_with_regionalized_biosphere, electricity_code),
                                            "output": (process['database'], process['code'])})
@@ -1174,7 +1174,7 @@ class Regioinvent:
                                            "name": electricity_activity_name,
                                            "location": electricity_region,
                                            "unit": unit_name,
-                                           "database": self.regioinvent_database_name,
+                                           "database": process['database'],
                                            "type": "technosphere",
                                            "input": (self.name_ei_with_regionalized_biosphere, electricity_code),
                                            "output": (process['database'], process['code'])})
@@ -1219,7 +1219,7 @@ class Regioinvent:
                                            "name": electricity_activity_name,
                                            "location": electricity_region,
                                            "unit": unit_name,
-                                           "database": self.regioinvent_database_name,
+                                           "database": process['database'],
                                            "type": "technosphere",
                                            "input": (self.name_ei_with_regionalized_biosphere, electricity_code),
                                            "output": (process['database'], process['code'])})
@@ -1268,7 +1268,7 @@ class Regioinvent:
                                            "name": waste_activity_name,
                                            "location": waste_region,
                                            "unit": unit_name,
-                                           "database": self.regioinvent_database_name,
+                                           "database": process['database'],
                                            "type": "technosphere",
                                            "input": (self.name_ei_with_regionalized_biosphere, waste_code),
                                            "output": (process['database'], process['code'])})
@@ -1344,12 +1344,20 @@ class Regioinvent:
 
             # special case for some Quebec heat flows
             if export_country == 'CA' and heat_flow != 'heat, central or small-scale, other than natural gas':
-                global_heat_process = ws.get_one(self.ei_wurst,
-                                                 ws.equals("reference product", heat_flow),
-                                                 ws.equals("location", 'GLO'),
-                                                 ws.equals("database", self.name_ei_with_regionalized_biosphere),
-                                                 ws.either(ws.contains("name", "market for"),
-                                                           ws.contains("name", "market group for")))
+                if self.name_ei_with_regionalized_biosphere in bw2.databases:
+                    global_heat_process = ws.get_one(self.ei_wurst,
+                                                     ws.equals("reference product", heat_flow),
+                                                     ws.equals("location", 'GLO'),
+                                                     ws.equals("database", self.name_ei_with_regionalized_biosphere),
+                                                     ws.either(ws.contains("name", "market for"),
+                                                               ws.contains("name", "market group for")))
+                else:
+                    global_heat_process = ws.get_one(self.ei_wurst,
+                                                     ws.equals("reference product", heat_flow),
+                                                     ws.equals("location", 'GLO'),
+                                                     ws.equals("database", self.ecoinvent_database_name),
+                                                     ws.either(ws.contains("name", "market for"),
+                                                               ws.contains("name", "market group for")))
 
                 heat_exchanges = {k: v * [i['amount'] for i in global_heat_process['exchanges'] if
                                           i['location'] == 'RoW'][0] for k, v in heat_exchanges.items()}
@@ -1368,11 +1376,10 @@ class Regioinvent:
                                              "name": heat_exc[0],
                                              "location": heat_exc[1],
                                              "unit": unit_name,
-                                             "database": self.regioinvent_database_name,
+                                             "database": process['database'],
                                              "type": "technosphere",
-                                             "input": (
-                                             self.ei_in_dict[(heat_flow, heat_exc[1], heat_exc[0])]['database'],
-                                             self.ei_in_dict[(heat_flow, heat_exc[1], heat_exc[0])]['code']),
+                                             "input": (self.name_ei_with_regionalized_biosphere,
+                                                       self.ei_in_dict[(heat_flow, heat_exc[1], heat_exc[0])]['code']),
                                              "output": (process['database'], process['code'])})
 
         else:
@@ -1395,9 +1402,9 @@ class Regioinvent:
                                                "name": heat_exc,
                                                "location": export_country,
                                                "unit": unit_name,
-                                               "database": self.regioinvent_database_name,
+                                               "database": process['database'],
                                                "type": "technosphere",
-                                               "input": (self.ei_in_dict[(heat_flow, export_country, heat_exc)]['database'],
+                                               "input": (self.name_ei_with_regionalized_biosphere,
                                                          self.ei_in_dict[(heat_flow, export_country, heat_exc)]['code']),
                                                "output": (process['database'], process['code'])})
 
@@ -1506,7 +1513,7 @@ class Regioinvent:
             if techno in ['water, deionised', 'water, ultrapure', 'water, decarbonised', 'water, completely softened']:
                 for region in used_regions:
                     if region not in already_existing[techno]:
-                        if magic_plumbering_geographies[region] == 'RoW':
+                        if magic_plumbering_geographies[region][0] == 'RoW':
                             production_ds = copy.deepcopy(self.ei_in_dict[(
                             techno, magic_plumbering_geographies[region][0], techno.replace('water', 'water production'))])
                         # for European countries, multiple possibilities
@@ -1541,12 +1548,34 @@ class Regioinvent:
                         production_ds['exchanges'][0]['location'] = production_ds['location']
                         production_ds['exchanges'][0]['input'] = (
                             self.name_ei_with_regionalized_biosphere, production_ds['code'])
+
+                        # regionalize created process
+                        if self.test_input_presence(production_ds, 'electricity', extra='aluminium/electricity'):
+                            production_ds = self.change_aluminium_electricity(production_ds, region)
+                        elif self.test_input_presence(production_ds, 'electricity', extra='cobalt/electricity'):
+                            production_ds = self.change_cobalt_electricity(production_ds)
+                        elif self.test_input_presence(production_ds, 'electricity', extra='voltage'):
+                            production_ds = self.change_electricity(production_ds, region)
+                        if self.test_input_presence(production_ds, 'municipal solid waste'):
+                            production_ds = self.change_waste(production_ds, region)
+                        if self.test_input_presence(production_ds, 'heat, district or industrial, natural gas'):
+                            production_ds = self.change_heat(production_ds, region,
+                                                             'heat, district or industrial, natural gas')
+                        if self.test_input_presence(production_ds,
+                                                    'heat, district or industrial, other than natural gas'):
+                            production_ds = self.change_heat(production_ds, region,
+                                                             'heat, district or industrial, other than natural gas')
+                        if self.test_input_presence(production_ds,
+                                                    'heat, central or small-scale, other than natural gas'):
+                            production_ds = self.change_heat(production_ds, region,
+                                                             'heat, central or small-scale, other than natural gas')
+
                         self.ei_wurst.append(production_ds)
 
             if techno in ['wastewater, average', 'wastewater, unpolluted']:
                 for region in used_regions:
                     if region not in already_existing[techno]:
-                        if magic_plumbering_geographies[region] == 'RoW':
+                        if magic_plumbering_geographies[region][0] == 'RoW':
                             production_ds = copy.deepcopy(
                                 self.ei_in_dict[(techno, 'RoW', 'treatment of ' + techno + ', wastewater treatment')])
                         else:
@@ -1571,13 +1600,35 @@ class Regioinvent:
                         production_ds['exchanges'][0]['location'] = production_ds['location']
                         production_ds['exchanges'][0]['input'] = (
                             self.name_ei_with_regionalized_biosphere, production_ds['code'])
+
+                        # regionalize created process
+                        if self.test_input_presence(production_ds, 'electricity', extra='aluminium/electricity'):
+                            production_ds = self.change_aluminium_electricity(production_ds, region)
+                        elif self.test_input_presence(production_ds, 'electricity', extra='cobalt/electricity'):
+                            production_ds = self.change_cobalt_electricity(production_ds)
+                        elif self.test_input_presence(production_ds, 'electricity', extra='voltage'):
+                            production_ds = self.change_electricity(production_ds, region)
+                        if self.test_input_presence(production_ds, 'municipal solid waste'):
+                            production_ds = self.change_waste(production_ds, region)
+                        if self.test_input_presence(production_ds, 'heat, district or industrial, natural gas'):
+                            production_ds = self.change_heat(production_ds, region,
+                                                             'heat, district or industrial, natural gas')
+                        if self.test_input_presence(production_ds,
+                                                    'heat, district or industrial, other than natural gas'):
+                            production_ds = self.change_heat(production_ds, region,
+                                                             'heat, district or industrial, other than natural gas')
+                        if self.test_input_presence(production_ds,
+                                                    'heat, central or small-scale, other than natural gas'):
+                            production_ds = self.change_heat(production_ds, region,
+                                                             'heat, central or small-scale, other than natural gas')
+
                         self.ei_wurst.append(production_ds)
 
             if techno == 'irrigation':
                 for region in used_regions:
                     if region not in already_existing[techno]:
                         for irrigation_type in ['irrigation, drip', 'irrigation, surface', 'irrigation, sprinkler']:
-                            if magic_plumbering_geographies[region] == 'RoW':
+                            if magic_plumbering_geographies[region][0] == 'RoW':
                                 production_ds = copy.deepcopy(
                                     self.ei_in_dict[(techno, magic_plumbering_geographies[region][0], irrigation_type)])
                             # for European countries, multiple possibilities
@@ -1609,6 +1660,27 @@ class Regioinvent:
                             production_ds['exchanges'][0]['location'] = production_ds['location']
                             production_ds['exchanges'][0]['input'] = (
                                 self.name_ei_with_regionalized_biosphere, production_ds['code'])
+
+                            # regionalize created process
+                            if self.test_input_presence(production_ds, 'electricity', extra='aluminium/electricity'):
+                                production_ds = self.change_aluminium_electricity(production_ds, region)
+                            elif self.test_input_presence(production_ds, 'electricity', extra='cobalt/electricity'):
+                                production_ds = self.change_cobalt_electricity(production_ds)
+                            elif self.test_input_presence(production_ds, 'electricity', extra='voltage'):
+                                production_ds = self.change_electricity(production_ds, region)
+                            if self.test_input_presence(production_ds, 'municipal solid waste'):
+                                production_ds = self.change_waste(production_ds, region)
+                            if self.test_input_presence(production_ds, 'heat, district or industrial, natural gas'):
+                                production_ds = self.change_heat(production_ds, region,
+                                                                 'heat, district or industrial, natural gas')
+                            if self.test_input_presence(production_ds,
+                                                        'heat, district or industrial, other than natural gas'):
+                                production_ds = self.change_heat(production_ds, region,
+                                                                 'heat, district or industrial, other than natural gas')
+                            if self.test_input_presence(production_ds,
+                                                        'heat, central or small-scale, other than natural gas'):
+                                production_ds = self.change_heat(production_ds, region,
+                                                                 'heat, central or small-scale, other than natural gas')
 
                             self.ei_wurst.append(production_ds)
 
@@ -1657,6 +1729,28 @@ class Regioinvent:
                             production_ds['exchanges'][0]['location'] = production_ds['location']
                             production_ds['exchanges'][0]['input'] = (
                                 self.name_ei_with_regionalized_biosphere, production_ds['code'])
+
+                            # regionalize created process
+                            if self.test_input_presence(production_ds, 'electricity', extra='aluminium/electricity'):
+                                production_ds = self.change_aluminium_electricity(production_ds, region)
+                            elif self.test_input_presence(production_ds, 'electricity', extra='cobalt/electricity'):
+                                production_ds = self.change_cobalt_electricity(production_ds)
+                            elif self.test_input_presence(production_ds, 'electricity', extra='voltage'):
+                                production_ds = self.change_electricity(production_ds, region)
+                            if self.test_input_presence(production_ds, 'municipal solid waste'):
+                                production_ds = self.change_waste(production_ds, region)
+                            if self.test_input_presence(production_ds, 'heat, district or industrial, natural gas'):
+                                production_ds = self.change_heat(production_ds, region,
+                                                                 'heat, district or industrial, natural gas')
+                            if self.test_input_presence(production_ds,
+                                                        'heat, district or industrial, other than natural gas'):
+                                production_ds = self.change_heat(production_ds, region,
+                                                                 'heat, district or industrial, other than natural gas')
+                            if self.test_input_presence(production_ds,
+                                                        'heat, central or small-scale, other than natural gas'):
+                                production_ds = self.change_heat(production_ds, region,
+                                                                 'heat, central or small-scale, other than natural gas')
+
                             self.ei_wurst.append(production_ds)
 
         # need to re-extract the dictionary because we added new processes to ei_wurst
