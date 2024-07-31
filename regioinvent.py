@@ -27,7 +27,7 @@ from tqdm import tqdm
 
 class Regioinvent:
     def __init__(self, trade_database_path, regioinvent_database_name, bw_project_name, ecoinvent_database_name,
-                 regionalized_elementary_flows=True, cutoff=0.95):
+                 regionalized_elementary_flows=True, cutoff=0.99):
         """
         :param trade_database_path:         [str] the path to the trade database, the latter should be downloaded from Zenodo:
                                             https://doi.org/10.5281/zenodo.11583815
@@ -365,48 +365,13 @@ class Regioinvent:
         :return: self.export_data
         """
 
-        self.logger.info("Extracting and formatting export data from UN COMTRADE...")
+        self.logger.info("Extracting export data from UN COMTRADE...")
 
-        self.export_data = pd.read_sql('SELECT * FROM "Export_data"', con=self.trade_conn)
+        self.export_data = pd.read_sql('SELECT * FROM "Export data"', con=self.trade_conn)
         # only keep total export values (no need for destination detail)
         self.export_data = self.export_data[self.export_data.partnerISO == 'W00']
-        # check if AtlQty is defined whenever Qty is empty. If it is, then use that value.
-        self.export_data.loc[self.export_data.qty == 0, 'qty'] = self.export_data.loc[self.export_data.qty == 0, 'altQty']
-        # don't need AtlQty afterwards and drop zero values
-        self.export_data = self.export_data.drop('altQty', axis=1)
-        self.export_data = self.export_data.loc[self.export_data.qty != 0]
-        # DEAL WITH UNITS IN TRADE DATA
-        # remove mistakes in units from data reporter
-        self.export_data = self.export_data.drop([i for i in self.export_data.index if (
-                (self.export_data.loc[i, 'cmdCode'] == '7005' and self.export_data.loc[i, 'qtyUnitAbbr'] == 'kg') or
-                (self.export_data.loc[i, 'cmdCode'] == '850720' and self.export_data.loc[i, 'qtyUnitAbbr'] in ['kg','ce/el']) or
-                (self.export_data.loc[i, 'cmdCode'] == '280421' and self.export_data.loc[i, 'qtyUnitAbbr'] == 'u') or
-                (self.export_data.loc[i, 'cmdCode'] == '280440' and self.export_data.loc[i, 'qtyUnitAbbr'] == 'u'))])
-        # convert data in different units
-        self.export_data.loc[[i for i in self.export_data.index if self.export_data.loc[i, 'cmdCode'] == '2804' and self.export_data.loc[
-            i, 'qtyUnitAbbr'] == 'kg'], 'qty'] /= 0.08375  # kg/m3 density of hydrogen
-        self.export_data.loc[[i for i in self.export_data.index if self.export_data.loc[i, 'cmdCode'] == '280421' and self.export_data.loc[
-            i, 'qtyUnitAbbr'] == 'kg'], 'qty'] /= 1.784  # kg/m3 density of argon
-        self.export_data.loc[[i for i in self.export_data.index if self.export_data.loc[i, 'cmdCode'] == '280429' and self.export_data.loc[
-            i, 'qtyUnitAbbr'] == 'kg'], 'qty'] /= 0.166  # kg/m3 density of helium
-        self.export_data.loc[[i for i in self.export_data.index if self.export_data.loc[i, 'cmdCode'] == '4412' and self.export_data.loc[
-            i, 'qtyUnitAbbr'] == 'kg'], 'qty'] /= 700  # kg/m3 density of wood
-        # change unit name
-        self.export_data.loc[[i for i in self.export_data.index if self.export_data.loc[i, 'cmdCode'] == '2804' and self.export_data.loc[
-            i, 'qtyUnitAbbr'] == 'kg'], 'qtyUnitAbbr'] = 'm³'
-        self.export_data.loc[[i for i in self.export_data.index if self.export_data.loc[i, 'cmdCode'] == '280421' and self.export_data.loc[
-            i, 'qtyUnitAbbr'] == 'kg'], 'qtyUnitAbbr'] = 'm³'
-        self.export_data.loc[[i for i in self.export_data.index if self.export_data.loc[i, 'cmdCode'] == '280429' and self.export_data.loc[
-            i, 'qtyUnitAbbr'] == 'kg'], 'qtyUnitAbbr'] = 'm³'
-        self.export_data.loc[[i for i in self.export_data.index if self.export_data.loc[i, 'cmdCode'] == '4412' and self.export_data.loc[
-            i, 'qtyUnitAbbr'] == 'kg'], 'qtyUnitAbbr'] = 'm³'
-        # check there are no other instances of data in multiple units
-        data_in_kg = set(self.export_data.loc[self.export_data.qtyUnitAbbr == 'kg'].cmdCode)
-        data_in_L = set(self.export_data.loc[self.export_data.qtyUnitAbbr == 'l'].cmdCode)
-        data_in_m2 = set(self.export_data.loc[self.export_data.qtyUnitAbbr == 'm²'].cmdCode)
-        data_in_m3 = set(self.export_data.loc[self.export_data.qtyUnitAbbr == 'm³'].cmdCode)
-        data_in_u = set(self.export_data.loc[self.export_data.qtyUnitAbbr == 'u'].cmdCode)
-        assert not (data_in_kg & data_in_L & data_in_m2 & data_in_m3 & data_in_u)
+        # remove null values
+        self.export_data = self.export_data.loc[self.export_data.usedqty != 0]
 
     def estimate_domestic_production(self):
         """
@@ -431,8 +396,9 @@ class Regioinvent:
                 columns={'index': 'cmdCode'}))
         self.domestic_data = self.domestic_data.merge(domestic_prod, left_on=['COMTRADE_reporter', 'cmdExio'],
                                                       right_on=['country', 'commodity'], how='left')
-        self.domestic_data.qty = (self.domestic_data.qty / (1 - self.domestic_data.loc[:, 'domestic use (%)'] / 100) *
-                                  self.domestic_data.loc[:, 'domestic use (%)'] / 100)
+        self.domestic_data.usedqty = (self.domestic_data.usedqty /
+                                      (1 - self.domestic_data.loc[:, 'domestic use (%)'] / 100) *
+                                      self.domestic_data.loc[:, 'domestic use (%)'] / 100)
         self.domestic_data.partnerISO = self.domestic_data.reporterISO
 
     def first_order_regionalization(self):
@@ -447,8 +413,8 @@ class Regioinvent:
             cmd_export_data = self.export_data[self.export_data.cmdCode.isin([self.eco_to_hs_class[product]])].copy(
                 'deep')
             # calculate the average export volume for each country
-            cmd_export_data = cmd_export_data.groupby('reporterISO').agg({'qty': 'mean'})
-            exporters = (cmd_export_data.qty / cmd_export_data.qty.sum()).sort_values(ascending=False)
+            cmd_export_data = cmd_export_data.groupby('reporterISO').agg({'usedqty': 'mean'})
+            exporters = (cmd_export_data.usedqty / cmd_export_data.usedqty.sum()).sort_values(ascending=False)
             # only keep the countries representing XX% of global exports of the product and create a RoW from that
             limit = exporters.index.get_loc(exporters[exporters.cumsum() > self.cutoff].index[0]) + 1
             remainder = exporters.iloc[limit:].sum()
@@ -658,47 +624,15 @@ class Regioinvent:
         :return: self.consumption_data
         """
 
-        self.logger.info("Extracting and formatting import data from UN COMTRADE...")
+        self.logger.info("Extracting import data from UN COMTRADE...")
 
-        self.import_data = pd.read_sql('SELECT * FROM "Import_data"', con=self.trade_conn)
+        self.import_data = pd.read_sql('SELECT * FROM "Import data"', con=self.trade_conn)
         # remove trade with "World"
         self.import_data = self.import_data.drop(self.import_data[self.import_data.partnerISO == 'W00'].index)
         # go from ISO3 codes to ISO2 codes
         self.import_data.reporterISO = [self.convert_ecoinvent_geos[i] for i in self.import_data.reporterISO]
         self.import_data.partnerISO = [self.convert_ecoinvent_geos[i] for i in self.import_data.partnerISO]
-        # check if AtlQty is defined whenever Qty is empty. If it is, then use that value.
-        self.import_data.loc[self.import_data.qty == 0, 'qty'] = self.import_data.loc[self.import_data.qty == 0, 'altQty']
-        # don't need AtlQty afterwards and drop zero values
-        self.import_data = self.import_data.drop('altQty', axis=1)
-        self.import_data = self.import_data.loc[self.import_data.qty != 0]
-        # convert data in different units
-        self.import_data.loc[self.import_data.loc[self.import_data.loc[:, 'qtyUnitAbbr'] == 'kg'].loc[
-                                 self.import_data.loc[:,
-                                 'cmdCode'] == '2804'].index, 'qty'] /= 0.08375  # kg/m3 density of hydrogen
-        self.import_data.loc[self.import_data.loc[self.import_data.loc[:, 'qtyUnitAbbr'] == 'kg'].loc[
-                                 self.import_data.loc[:,
-                                 'cmdCode'] == '280421'].index, 'qty'] /= 1.784  # kg/m3 density of argon
-        self.import_data.loc[self.import_data.loc[self.import_data.loc[:, 'qtyUnitAbbr'] == 'kg'].loc[
-                                 self.import_data.loc[:,
-                                 'cmdCode'] == '4412'].index, 'qty'] /= 700  # kg/m3 density of wood
-        # change unit name
-        self.import_data.loc[self.import_data.loc[self.import_data.loc[:, 'qtyUnitAbbr'] == 'kg'].loc[
-                                 self.import_data.loc[:, 'cmdCode'] == '2804'].index, 'qtyUnitAbbr'] = 'm³'
-        self.import_data.loc[self.import_data.loc[self.import_data.loc[:, 'qtyUnitAbbr'] == 'kg'].loc[
-                                 self.import_data.loc[:, 'cmdCode'] == '280421'].index, 'qtyUnitAbbr'] = 'm³'
-        self.import_data.loc[self.import_data.loc[self.import_data.loc[:, 'qtyUnitAbbr'] == 'kg'].loc[
-                                 self.import_data.loc[:, 'cmdCode'] == '4412'].index, 'qtyUnitAbbr'] = 'm³'
-        # correct mistake for the trade of natural gas (271121) between Mexico and the US in 2021, 2022 and 2023
-        self.import_data.loc[[i for i in self.import_data.index if self.import_data.loc[i, 'cmdCode'] == '271121' and
-                              self.import_data.loc[i, 'reporterISO'] == 'MEX'
-                              and self.import_data.loc[i, 'refYear'] in [2021, 2022, 2023]], 'qty'] *= 0.000712 # kg/L density of natural gas
-        # check there are no other instances of data in multiple units
-        data_in_kg = set(self.import_data.loc[self.import_data.qtyUnitAbbr == 'kg'].cmdCode)
-        data_in_L = set(self.import_data.loc[self.import_data.qtyUnitAbbr == 'l'].cmdCode)
-        data_in_m2 = set(self.import_data.loc[self.import_data.qtyUnitAbbr == 'm²'].cmdCode)
-        data_in_m3 = set(self.import_data.loc[self.import_data.qtyUnitAbbr == 'm³'].cmdCode)
-        data_in_u = set(self.import_data.loc[self.import_data.qtyUnitAbbr == 'u'].cmdCode)
-        assert not (data_in_kg & data_in_L & data_in_m2 & data_in_m3 & data_in_u)
+        self.import_data = self.import_data.loc[self.import_data.usedqty != 0]
 
         # remove artefacts of domestic trade from international trade data
         self.import_data = self.import_data.drop(
@@ -706,7 +640,7 @@ class Regioinvent:
         # concatenate import and domestic data
         self.consumption_data = pd.concat([self.import_data, self.domestic_data.loc[:, self.import_data.columns]])
         # get rid of infinite values
-        self.consumption_data.qty = self.consumption_data.qty.replace(np.inf, 0.0)
+        self.consumption_data.usedqty = self.consumption_data.usedqty.replace(np.inf, 0.0)
 
         # save RAM
         del self.import_data
@@ -731,10 +665,10 @@ class Regioinvent:
             cmd_consumption_data = self.consumption_data[
                 self.consumption_data.cmdCode == self.eco_to_hs_class[product]].copy('deep')
             # calculate the average import volume for each country
-            cmd_consumption_data = cmd_consumption_data.groupby(['reporterISO', 'partnerISO']).agg({'qty': 'mean'})
+            cmd_consumption_data = cmd_consumption_data.groupby(['reporterISO', 'partnerISO']).agg({'usedqty': 'mean'})
             # change to relative
             importers = (cmd_consumption_data.groupby(level=0).sum() /
-                         cmd_consumption_data.sum().sum()).sort_values(by='qty', ascending=False)
+                         cmd_consumption_data.sum().sum()).sort_values(by='usedqty', ascending=False)
             # only keep importers till the cut-off of total imports
             limit = importers.index.get_loc(importers[importers.cumsum() > self.cutoff].dropna().index[0]) + 1
             # aggregate the rest
@@ -746,8 +680,8 @@ class Regioinvent:
             cmd_consumption_data = cmd_consumption_data.sort_index()
 
             for importer in cmd_consumption_data.index.levels[0]:
-                cmd_consumption_data.loc[importer, 'qty'] = (cmd_consumption_data.loc[importer, 'qty'] /
-                                                             cmd_consumption_data.loc[importer, 'qty'].sum()).values
+                cmd_consumption_data.loc[importer, 'usedqty'] = (cmd_consumption_data.loc[importer, 'usedqty'] /
+                                                             cmd_consumption_data.loc[importer, 'usedqty'].sum()).values
                 # we need to add the aggregate to potentially already existing RoW exchanges
                 cmd_consumption_data = pd.concat([cmd_consumption_data.drop('RoW', level=0),
                                 pd.concat([cmd_consumption_data.loc['RoW'].groupby(level=0).sum()], keys=['RoW'])])
@@ -779,7 +713,7 @@ class Regioinvent:
                             share = self.distribution_technologies[product][technology]
 
                             new_import_data['exchanges'].append({
-                                'amount': cmd_consumption_data.loc[(importer, trading_partner), 'qty'] * share,
+                                'amount': cmd_consumption_data.loc[(importer, trading_partner), 'usedqty'] * share,
                                 'type': 'technosphere',
                                 'input': (self.regioinvent_database_name, code),
                                 'name': product
@@ -791,7 +725,7 @@ class Regioinvent:
                             share = self.distribution_technologies[product][technology]
 
                             new_import_data['exchanges'].append({
-                                'amount': cmd_consumption_data.loc[(importer, trading_partner), 'qty'] * share,
+                                'amount': cmd_consumption_data.loc[(importer, trading_partner), 'usedqty'] * share,
                                 'type': 'technosphere',
                                 'input': (self.regioinvent_database_name, code),
                                 'name': product
@@ -1010,7 +944,7 @@ class Regioinvent:
         consumption_markets_data = {(i['name'], i['location']): i for i in self.regioinvent_in_wurst if
                                     'consumption market' in i['name']}
 
-        # first we connect ecoinvent to consumtpion markets of regioinvent
+        # first we connect ecoinvent to consumption markets of regioinvent
         for process in bw2.Database(self.name_ei_with_regionalized_biosphere):
             location = None
             # for countries (e.g., CA)
@@ -1122,6 +1056,7 @@ class Regioinvent:
                                            "location": electricity_region,
                                            "unit": unit_name,
                                            "database": process['database'],
+                                           "code": electricity_code,
                                            "type": "technosphere",
                                            "input": (self.name_ei_with_regionalized_biosphere, electricity_code),
                                            "output": (process['database'], process['code'])})
@@ -1175,6 +1110,7 @@ class Regioinvent:
                                            "location": electricity_region,
                                            "unit": unit_name,
                                            "database": process['database'],
+                                           "code": electricity_code,
                                            "type": "technosphere",
                                            "input": (self.name_ei_with_regionalized_biosphere, electricity_code),
                                            "output": (process['database'], process['code'])})
@@ -1220,6 +1156,7 @@ class Regioinvent:
                                            "location": electricity_region,
                                            "unit": unit_name,
                                            "database": process['database'],
+                                           "code": electricity_code,
                                            "type": "technosphere",
                                            "input": (self.name_ei_with_regionalized_biosphere, electricity_code),
                                            "output": (process['database'], process['code'])})
@@ -1269,6 +1206,7 @@ class Regioinvent:
                                            "location": waste_region,
                                            "unit": unit_name,
                                            "database": process['database'],
+                                           "code": waste_code,
                                            "type": "technosphere",
                                            "input": (self.name_ei_with_regionalized_biosphere, waste_code),
                                            "output": (process['database'], process['code'])})
@@ -1377,6 +1315,7 @@ class Regioinvent:
                                              "location": heat_exc[1],
                                              "unit": unit_name,
                                              "database": process['database'],
+                                             "code": self.ei_in_dict[(heat_flow, heat_exc[1], heat_exc[0])]['code'],
                                              "type": "technosphere",
                                              "input": (self.name_ei_with_regionalized_biosphere,
                                                        self.ei_in_dict[(heat_flow, heat_exc[1], heat_exc[0])]['code']),
@@ -1403,6 +1342,7 @@ class Regioinvent:
                                                "location": export_country,
                                                "unit": unit_name,
                                                "database": process['database'],
+                                               "code": self.ei_in_dict[(heat_flow, export_country, heat_exc)]['code'],
                                                "type": "technosphere",
                                                "input": (self.name_ei_with_regionalized_biosphere,
                                                          self.ei_in_dict[(heat_flow, export_country, heat_exc)]['code']),
