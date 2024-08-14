@@ -57,7 +57,7 @@ class Regioinvent:
         self.regioinvent_database_name = regioinvent_database_name
         self.ecoinvent_database_name = ecoinvent_database_name
         self.name_ei_with_regionalized_biosphere = ecoinvent_database_name + ' regionalized'
-        self.name_regionalized_biosphere_database = 'biosphere3_regionalized_flows'
+        self.name_regionalized_biosphere_database = 'biosphere3_spatialized_flows'
         self.cutoff = cutoff
         self.regio_bio = regionalized_elementary_flows
         self.trade_conn = sqlite3.connect(trade_database_path)
