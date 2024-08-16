@@ -57,7 +57,7 @@ class Regioinvent:
         self.regioinvent_database_name = regioinvent_database_name
         self.ecoinvent_database_name = ecoinvent_database_name
         self.name_ei_with_regionalized_biosphere = ecoinvent_database_name + ' regionalized'
-        self.name_regionalized_biosphere_database = 'biosphere3_spatialized_flows'
+        self.name_spatialized_biosphere = 'biosphere3_spatialized_flows'
         self.cutoff = cutoff
         self.regio_bio = regionalized_elementary_flows
         self.trade_conn = sqlite3.connect(trade_database_path)
@@ -164,7 +164,7 @@ class Regioinvent:
                                          'Phosphorus, total']
 
         if self.regio_bio:
-            if self.name_regionalized_biosphere_database not in bw2.databases:
+            if self.name_spatialized_biosphere not in bw2.databases:
                 self.logger.info("Creating regionalized biosphere flows...")
                 self.create_regionalized_biosphere_flows()
             if 'IMPACT World+ Damage 2.0.1_regionalized' not in [i[0] for i in list(bw2.methods)]:
@@ -200,7 +200,7 @@ class Regioinvent:
         with open(pkg_resources.resource_filename(__name__, '/Data/regionalized_biosphere_database.pickle'), 'rb') as f:
             regionalized_biosphere = pickle.load(f)
 
-        bw2.Database(self.name_regionalized_biosphere_database).write(regionalized_biosphere)
+        bw2.Database(self.name_spatialized_biosphere).write(regionalized_biosphere)
 
     def importing_impact_world_plus(self):
         """
@@ -219,9 +219,9 @@ class Regioinvent:
         self.logger.info("Regionalizing the biosphere inputs of the original ecoinvent database...")
 
         base_regionalized_flows = set([', '.join(i.as_dict()['name'].split(', ')[:-1]) for i in
-                                       bw2.Database(self.name_regionalized_biosphere_database)])
+                                       bw2.Database(self.name_spatialized_biosphere)])
         regionalized_flows = {(i.as_dict()['name'], i.as_dict()['categories']): i.as_dict()['code'] for i in
-                              bw2.Database(self.name_regionalized_biosphere_database)}
+                              bw2.Database(self.name_spatialized_biosphere)}
         ei_iw_geo_mapping = pd.read_excel(pkg_resources.resource_filename(
             __name__, '/Data/ei_iw_geo_mapping.xlsx')).fillna('NA').set_index('ecoinvent')
 
@@ -238,7 +238,7 @@ class Regioinvent:
                                 exc['code'] = regionalized_flows[(
                                 exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'water'],
                                 exc['categories'])]
-                                exc['database'] = self.name_regionalized_biosphere_database
+                                exc['database'] = self.name_spatialized_biosphere
                                 exc['name'] = exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'water']
                                 exc['input'] = (exc['database'], exc['code'])
                         elif 'Occupation' in exc['name'] or 'Transformation' in exc['name']:
@@ -247,12 +247,12 @@ class Regioinvent:
                                 exc['code'] = regionalized_flows[(
                                 exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'land'],
                                 exc['categories'])]
-                                exc['database'] = self.name_regionalized_biosphere_database
+                                exc['database'] = self.name_spatialized_biosphere
                                 exc['name'] = exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'land']
                                 exc['input'] = (exc['database'], exc['code'])
                             elif (exc['name'] + ', GLO', exc['categories']) in regionalized_flows.keys():
                                 exc['code'] = regionalized_flows[(exc['name'] + ', GLO', exc['categories'])]
-                                exc['database'] = self.name_regionalized_biosphere_database
+                                exc['database'] = self.name_spatialized_biosphere
                                 exc['name'] = exc['name'] + ', GLO'
                                 exc['input'] = (exc['database'], exc['code'])
                         elif exc['name'] in ['BOD5, Biological Oxygen Demand', 'COD, Chemical Oxygen Demand',
@@ -262,7 +262,7 @@ class Regioinvent:
                                 exc['code'] = regionalized_flows[(
                                 exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'eutro'],
                                 exc['categories'])]
-                                exc['database'] = self.name_regionalized_biosphere_database
+                                exc['database'] = self.name_spatialized_biosphere
                                 exc['name'] = exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'eutro']
                                 exc['input'] = (exc['database'], exc['code'])
                         else:
@@ -271,7 +271,7 @@ class Regioinvent:
                                 exc['code'] = regionalized_flows[(
                                 exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'acid'],
                                 exc['categories'])]
-                                exc['database'] = self.name_regionalized_biosphere_database
+                                exc['database'] = self.name_spatialized_biosphere
                                 exc['name'] = exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'acid']
                                 exc['input'] = (exc['database'], exc['code'])
                 else:
@@ -789,6 +789,10 @@ class Regioinvent:
                                             replace_process = self.ei_in_dict[(
                                                 exc['product'], magic_plumbering_geographies[process['location']][1],
                                                 'market for tap water')]
+                                        if exc['name'] == 'market group for irrigation':
+                                            replace_process = self.ei_in_dict[(
+                                                exc['product'], magic_plumbering_geographies[process['location']][1],
+                                                'market for irrigation')]
                                     exc['code'] = replace_process['code']
                                     exc['name'] = replace_process['name']
                                     exc['product'] = replace_process['reference product']
@@ -847,9 +851,9 @@ class Regioinvent:
         self.logger.info("Regionalizing the elementary flows of the regioinvent database...")
 
         base_regionalized_flows = set([', '.join(i.as_dict()['name'].split(', ')[:-1]) for i in
-                                       bw2.Database(self.name_regionalized_biosphere_database)])
+                                       bw2.Database(self.name_spatialized_biosphere)])
         regionalized_flows = {(i.as_dict()['name'], i.as_dict()['categories']): i.as_dict()['code'] for i in
-                              bw2.Database(self.name_regionalized_biosphere_database)}
+                              bw2.Database(self.name_spatialized_biosphere)}
         regio_iw_geo_mapping = pd.read_excel(pkg_resources.resource_filename(
             __name__, '/Data/regio_iw_geo_mapping.xlsx')).fillna('NA').set_index('regioinvent')
 
@@ -864,7 +868,7 @@ class Regioinvent:
                                 exc['code'] = regionalized_flows[(
                                 exc['name'] + ', ' + regio_iw_geo_mapping.loc[process['location'], 'water'],
                                 exc['categories'])]
-                                exc['database'] = self.name_regionalized_biosphere_database
+                                exc['database'] = self.name_spatialized_biosphere
                                 exc['name'] = exc['name'] + ', ' + regio_iw_geo_mapping.loc[
                                     process['location'], 'water']
                                 exc['input'] = (exc['database'], exc['code'])
@@ -874,12 +878,12 @@ class Regioinvent:
                                 exc['code'] = regionalized_flows[(
                                 exc['name'] + ', ' + regio_iw_geo_mapping.loc[process['location'], 'land'],
                                 exc['categories'])]
-                                exc['database'] = self.name_regionalized_biosphere_database
+                                exc['database'] = self.name_spatialized_biosphere
                                 exc['name'] = exc['name'] + ', ' + regio_iw_geo_mapping.loc[process['location'], 'land']
                                 exc['input'] = (exc['database'], exc['code'])
                             elif (exc['name'] + ', GLO', exc['categories']) in regionalized_flows.keys():
                                 exc['code'] = regionalized_flows[(exc['name'] + ', GLO', exc['categories'])]
-                                exc['database'] = self.name_regionalized_biosphere_database
+                                exc['database'] = self.name_spatialized_biosphere
                                 exc['name'] = exc['name'] + ', GLO'
                                 exc['input'] = (exc['database'], exc['code'])
                         elif exc['name'] in ['BOD5, Biological Oxygen Demand', 'COD, Chemical Oxygen Demand',
@@ -889,7 +893,7 @@ class Regioinvent:
                                 exc['code'] = regionalized_flows[(
                                 exc['name'] + ', ' + regio_iw_geo_mapping.loc[process['location'], 'eutro'],
                                 exc['categories'])]
-                                exc['database'] = self.name_regionalized_biosphere_database
+                                exc['database'] = self.name_spatialized_biosphere
                                 exc['name'] = exc['name'] + ', ' + regio_iw_geo_mapping.loc[
                                     process['location'], 'eutro']
                                 exc['input'] = (exc['database'], exc['code'])
@@ -899,7 +903,7 @@ class Regioinvent:
                                 exc['code'] = regionalized_flows[(
                                 exc['name'] + ', ' + regio_iw_geo_mapping.loc[process['location'], 'acid'],
                                 exc['categories'])]
-                                exc['database'] = self.name_regionalized_biosphere_database
+                                exc['database'] = self.name_spatialized_biosphere
                                 exc['name'] = exc['name'] + ', ' + regio_iw_geo_mapping.loc[process['location'], 'acid']
                                 exc['input'] = (exc['database'], exc['code'])
 
