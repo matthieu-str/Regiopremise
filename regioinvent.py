@@ -477,10 +477,10 @@ class Regioinvent:
             global_market_activity = copy.deepcopy(dataset)
 
             # rename activity
-            global_market_activity['name'] = f"""production market for {product}"""
+            global_market_activity['name'] = f"""export market for {product}"""
 
             # add a comment
-            global_market_activity['comment'] = f"""This process represents the global production market for {product}. The shares come from export data from the UN COMTRADE database. Data from UN COMTRADE is already in physical units. An average of the 5 last years of export trade available data is taken (in general from 2019 to 2023). Countries are taken until 95% of the global production amounts are covered, the rest of the data is aggregated in a RoW (Rest-of-the-World) region."""
+            global_market_activity['comment'] = f"""This process represents the global export market for {product}. It can be used as a proxy for global production market but is not a global production market as it does not include domestic production data. The shares come from export data from the UN COMTRADE database. Data from UN COMTRADE is already in physical units. An average of the 5 last years of export trade available data is taken (in general from 2019 to 2023). Countries are taken until XX% of the global production amounts are covered, XX being the cut-off you selected while generating the regioinvent database. The rest of the data is aggregated in a RoW (Rest-of-the-World) region."""
 
             # location will be global (global market)
             global_market_activity['location'] = 'GLO'
