@@ -533,11 +533,15 @@ class Regioinvent:
                 regio_process['database'] = self.regioinvent_database_name
                 # add comment
                 regio_process['comment'] = f'This process is a regionalized adaptation of the following process of the ecoinvent database: {activity} | {product} | {region}. No amount values were modified in the regionalization process, only their origin.'
-                # update production exchange. Should always be the first one that comes out
-                regio_process['exchanges'][0]['code'] = regio_process['code']
-                regio_process['exchanges'][0]['database'] = regio_process['database']
-                regio_process['exchanges'][0]['location'] = regio_process['location']
-                regio_process['exchanges'][0]['input'] = (regio_process['database'], regio_process['code'])
+                # update production exchange
+                for k in range(len(regio_process['exchanges'])):
+                    if regio_process['exchanges'][k]['type'] == 'production':
+                        regio_process['exchanges'][k]['code'] = regio_process['code']
+                        regio_process['exchanges'][k]['database'] = regio_process['database']
+                        regio_process['exchanges'][k]['location'] = regio_process['location']
+                        regio_process['exchanges'][k]['input'] = (regio_process['database'], regio_process['code'])
+                        break
+
                 # input the regionalized process into the global production market
                 global_market_activity['exchanges'].append(
                     {"amount": exporters.loc[export_country] * self.distribution_technologies[product][activity],
@@ -568,7 +572,9 @@ class Regioinvent:
                                 regio_process = copy_process(product, technology, potential_region, exporter)
                     # otherwise, take either RoW, GLO or a random available geography
                     if not regio_process:
-                        if 'RoW' in possibilities[technology]:
+                        if 'World' in possibilities[technology]:
+                            regio_process = copy_process(product, technology, 'World', exporter)
+                        elif 'RoW' in possibilities[technology]:
                             regio_process = copy_process(product, technology, 'RoW', exporter)
                         elif 'GLO' in possibilities[technology]:
                             regio_process = copy_process(product, technology, 'GLO', exporter)
@@ -945,7 +951,7 @@ class Regioinvent:
 
         # notice that here we are directly manipulating (through bw2) the already-written ecoinvent database
 
-        consumption_markets_data = {(i['name'], i['location']): i for i in self.regioinvent_in_wurst if
+        consumption_markets_data = {(i['name'], i['location']): i for i in bw2.Database(self.regioinvent_database_name) if
                                     'consumption market' in i['name']}
 
         # first we connect ecoinvent to consumption markets of regioinvent
@@ -968,10 +974,16 @@ class Regioinvent:
                             exc.as_dict()['code'] = (consumption_markets_data[
                                 ('consumption market for ' + exc.as_dict()['product'], location)]['code'])
                         else:
-                            exc.as_dict()['database'] = (consumption_markets_data[
-                                ('consumption market for ' + exc.as_dict()['product'], 'RoW')]['database'])
-                            exc.as_dict()['code'] = (consumption_markets_data[
-                                ('consumption market for ' + exc.as_dict()['product'], 'RoW')]['code'])
+                            try:
+                                exc.as_dict()['database'] = (consumption_markets_data[
+                                    ('consumption market for ' + exc.as_dict()['product'], 'RoW')]['database'])
+                                exc.as_dict()['code'] = (consumption_markets_data[
+                                    ('consumption market for ' + exc.as_dict()['product'], 'RoW')]['code'])
+                            except KeyError:
+                                exc.as_dict()['database'] = (consumption_markets_data[
+                                    ('consumption market for ' + exc.as_dict()['product'], 'World')]['database'])
+                                exc.as_dict()['code'] = (consumption_markets_data[
+                                    ('consumption market for ' + exc.as_dict()['product'], 'World')]['code'])
                         exc.as_dict()['input'] = (exc.as_dict()['database'], exc.as_dict()['code'])
                         exc.save()
 
@@ -1285,27 +1297,28 @@ class Regioinvent:
                     heat_exchanges[exc['name'], exc['location']] = exc['amount']
 
             # special case for some Quebec heat flows
-            if export_country == 'CA' and heat_flow != 'heat, central or small-scale, other than natural gas':
-                if self.name_ei_with_regionalized_biosphere in bw2.databases:
-                    global_heat_process = ws.get_one(self.ei_wurst,
-                                                     ws.equals("reference product", heat_flow),
-                                                     ws.equals("location", 'GLO'),
-                                                     ws.equals("database", self.name_ei_with_regionalized_biosphere),
-                                                     ws.either(ws.contains("name", "market for"),
-                                                               ws.contains("name", "market group for")))
-                else:
-                    global_heat_process = ws.get_one(self.ei_wurst,
-                                                     ws.equals("reference product", heat_flow),
-                                                     ws.equals("location", 'GLO'),
-                                                     ws.equals("database", self.ecoinvent_database_name),
-                                                     ws.either(ws.contains("name", "market for"),
-                                                               ws.contains("name", "market group for")))
+            # if export_country == 'CA' and heat_flow != 'heat, central or small-scale, other than natural gas':
+            if self.name_ei_with_regionalized_biosphere in bw2.databases:
+                global_heat_process = ws.get_one(self.ei_wurst,
+                                                 ws.equals("reference product", heat_flow),
+                                                 ws.equals("location", 'GLO'),
+                                                 ws.equals("database", self.name_ei_with_regionalized_biosphere),
+                                                 ws.either(ws.contains("name", "market for"),
+                                                           ws.contains("name", "market group for")))
+            else:
+                global_heat_process = ws.get_one(self.ei_wurst,
+                                                 ws.equals("reference product", heat_flow),
+                                                 ws.equals("location", 'GLO'),
+                                                 ws.equals("database", self.ecoinvent_database_name),
+                                                 ws.either(ws.contains("name", "market for"),
+                                                           ws.contains("name", "market group for")))
 
-                heat_exchanges = {k: v * [i['amount'] for i in global_heat_process['exchanges'] if
-                                          i['location'] == 'RoW'][0] for k, v in heat_exchanges.items()}
-                heat_exchanges[
-                    ([i for i in global_heat_process['exchanges'] if i['location'] == 'CA-QC'][0]['name'], 'CA-QC')] = (
-                    [i for i in global_heat_process['exchanges'] if i['location'] == 'CA-QC'][0]['amount'])
+            heat_exchanges = {k: v * [i['amount'] for i in global_heat_process['exchanges'] if
+                                      (i['location'] == 'RoW') | (i['location'] == 'World')][0]
+                              for k, v in heat_exchanges.items()}
+                # heat_exchanges[
+                #     ([i for i in global_heat_process['exchanges'] if i['location'] == 'CA-QC'][0]['name'], 'CA-QC')] = (
+                #     [i for i in global_heat_process['exchanges'] if i['location'] == 'CA-QC'][0]['amount'])
             # make it relative amounts
             heat_exchanges = {k: v / sum(heat_exchanges.values()) for k, v in heat_exchanges.items()}
             # scale the relative amount to the qty of heat of process
