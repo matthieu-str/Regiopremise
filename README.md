@@ -1,3 +1,9 @@
+# _Regiopremise_
+
+This repository adapts the original _Regioinvent_ tool to [_premise_](https://github.com/polca/premise) databases. 
+The main changes lie in the fact that _premise_ includes several additional locations and LCI datasets. 
+Additional locations correspond to Integrated Assessment Models (IAMs) regions. 
+
 ## _Regioinvent_
 
 ```Regioinvent``` is a Python package for automatically regionalizing the ecoinvent database using trade data. Copies of 
