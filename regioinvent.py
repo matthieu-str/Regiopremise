@@ -26,14 +26,14 @@ from tqdm import tqdm
 
 
 class Regioinvent:
-    def __init__(self, trade_database_path, regioinvent_database_name, bw_project_name, ecoinvent_database_name,
+    def __init__(self, trade_database_path, regiopremise_database_name, bw_project_name, premise_database_name,
                  regionalized_elementary_flows=True, cutoff=0.99):
         """
         :param trade_database_path:         [str] the path to the trade database, the latter should be downloaded from Zenodo:
                                             https://doi.org/10.5281/zenodo.11583815
-        :param regioinvent_database_name:   [str] the name to be given to the created regionalized ecoinvent database
+        :param regiopremise_database_name:   [str] the name to be given to the created regionalized ecoinvent database
         :param bw_project_name:             [str] the name of a brightway2 project containing an ecoinvent database
-        :param ecoinvent_database_name:     [str] the name of the ecoinvent database within the brightway2 project
+        :param premise_database_name:     [str] the name of the ecoinvent database within the brightway2 project
         :param regionalized_elementary_flows: [boolean] should elementary flows be regionalized or not?
         :param cutoff:                      [float] cut-off up to which countries will be covered as separate geographies (not in RoW).
                                             A higher cut-off means a bigger resulting database (careful it's not linear)
@@ -54,9 +54,9 @@ class Regioinvent:
         bw2.projects.set_current(bw_project_name)
 
         # set up necessary variables
-        self.regioinvent_database_name = regioinvent_database_name
-        self.ecoinvent_database_name = ecoinvent_database_name
-        self.name_ei_with_regionalized_biosphere = ecoinvent_database_name + ' regionalized'
+        self.regioinvent_database_name = regiopremise_database_name
+        self.ecoinvent_database_name = premise_database_name
+        self.name_ei_with_regionalized_biosphere = premise_database_name + ' regionalized'
         self.name_spatialized_biosphere = 'biosphere3_spatialized_flows'
         self.cutoff = cutoff
         self.regio_bio = regionalized_elementary_flows
