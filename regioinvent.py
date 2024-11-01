@@ -56,8 +56,8 @@ class Regioinvent:
         # set up necessary variables
         self.regioinvent_database_name = regiopremise_database_name
         self.ecoinvent_database_name = premise_database_name
-        self.name_ei_with_regionalized_biosphere = premise_database_name + ' regionalized'
-        self.name_spatialized_biosphere = 'biosphere3_spatialized_flows'
+        self.name_ei_with_regionalized_biosphere = premise_database_name + ' regionalized for EF'
+        self.name_spatialized_biosphere = 'biosphere3_spatialized_flows_EF'
         self.cutoff = cutoff
         self.regio_bio = regionalized_elementary_flows
         self.trade_conn = sqlite3.connect(trade_database_path)
@@ -223,7 +223,7 @@ class Regioinvent:
         regionalized_flows = {(i.as_dict()['name'], i.as_dict()['categories']): i.as_dict()['code'] for i in
                               bw2.Database(self.name_spatialized_biosphere)}
         ei_iw_geo_mapping = pd.read_excel(pkg_resources.resource_filename(
-            __name__, '/Data/ei_iw_geo_mapping.xlsx')).fillna('NA').set_index('ecoinvent')
+            __name__, '/Data/ei_ef_geo_mapping.xlsx')).fillna('NA').set_index('ecoinvent')
 
         self.fix_ecoinvent_water()
 
