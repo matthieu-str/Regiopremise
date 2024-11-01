@@ -49,6 +49,10 @@ Once the regionalized version of ecoinvent is created, you can perform your LCAs
 activity-browser. <br> There are currently no support for other LCA software, as SimaPro and openLCA are not able to 
 support such a massive database.
 
+## Adaptations
+- ```Regiopremise``` (https://github.com/matthieu-str/Regiopremise) is an adaptation of regioinvent that can work with the 
+```premise``` library (https://github.com/polca/premise) and can operate with a regionalized EF3.1 version.
+
 ## Documentation
 
 _incoming through a scientific article_
