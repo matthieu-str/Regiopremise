@@ -167,9 +167,9 @@ class Regioinvent:
             if self.name_spatialized_biosphere not in bw2.databases:
                 self.logger.info("Creating regionalized biosphere flows...")
                 self.create_regionalized_biosphere_flows()
-            if 'IMPACT World+ Damage 2.0.1_regionalized' not in [i[0] for i in list(bw2.methods)]:
+            if 'EF v3.1 regionalized' not in [i[0] for i in list(bw2.methods)]:
                 self.logger.info("Importing regionalized LCIA method...")
-                self.importing_impact_world_plus()
+                self.importing_ef_regionalized()
             if self.name_ei_with_regionalized_biosphere not in bw2.databases:
                 self.logger.info("Extracting ecoinvent to wurst...")
                 self.ei_wurst = wurst.extract_brightway2_databases(self.ecoinvent_database_name, add_identifiers=True)
@@ -197,18 +197,18 @@ class Regioinvent:
         Function creates a regionalized version of the biosphere3 database of a brightway2 project
         """
 
-        with open(pkg_resources.resource_filename(__name__, '/Data/regionalized_biosphere_database.pickle'), 'rb') as f:
+        with open(pkg_resources.resource_filename(__name__, '/Data/biosphere3_spatialized_flows_EF.pickle'), 'rb') as f:
             regionalized_biosphere = pickle.load(f)
 
         bw2.Database(self.name_spatialized_biosphere).write(regionalized_biosphere)
 
-    def importing_impact_world_plus(self):
+    def importing_ef_regionalized(self):
         """
         Function loads the IMPACT World+ LCIA methodology, the fully regionalized version
         """
 
         bw2.BW2Package.import_file(pkg_resources.resource_filename(
-            __name__, '/Data/impact_world_plus_201_regionalized.ea4b5ad0766f4bb60242724bd3ee92ec.bw2package'))
+            __name__, '/Data/EF31_regionalized.107ba4a7333c947eda5a783113d3f34f.bw2package'))
 
     def create_ecoinvent_with_regionalized_biosphere_flows(self):
         """
