@@ -26,17 +26,12 @@ from tqdm import tqdm
 
 
 class Regioinvent:
-    def __init__(self, trade_database_path, regioinvent_database_name, bw_project_name, ecoinvent_database_name,
-                 regionalized_elementary_flows=True, cutoff=0.99):
+    def __init__(self, bw_project_name, ecoinvent_database_name, ecoinvent_version):
         """
-        :param trade_database_path:         [str] the path to the trade database, the latter should be downloaded from Zenodo:
-                                            https://doi.org/10.5281/zenodo.11583815
-        :param regioinvent_database_name:   [str] the name to be given to the created regionalized ecoinvent database
-        :param bw_project_name:             [str] the name of a brightway2 project containing an ecoinvent database
-        :param ecoinvent_database_name:     [str] the name of the ecoinvent database within the brightway2 project
-        :param regionalized_elementary_flows: [boolean] should elementary flows be regionalized or not?
-        :param cutoff:                      [float] cut-off up to which countries will be covered as separate geographies (not in RoW).
-                                            A higher cut-off means a bigger resulting database (careful it's not linear)
+        :param bw_project_name:         [str] the name of a brightway2 project containing an ecoinvent database.
+        :param ecoinvent_database_name: [str] the name of the ecoinvent database within the brightway2 project.
+        :param ecoinvent_version:       [str] the version of the ecoinvent database within the brightway2 project,
+                                            values can be "3.9.1" or "3.10".
         """
 
         # set up logging tool
@@ -51,19 +46,25 @@ class Regioinvent:
         self.logger.propagate = False
 
         # set up brightway project
+        if bw_project_name not in bw2.projects:
+            raise KeyError("The brightway project name passed does not match with any existing brightway projects.")
         bw2.projects.set_current(bw_project_name)
+        if ecoinvent_database_name not in bw2.databases:
+            raise KeyError("The ecoinvent database name passed does not match with the existing databases within the brightway project.")
 
         # set up necessary variables
-        self.regioinvent_database_name = regioinvent_database_name
         self.ecoinvent_database_name = ecoinvent_database_name
         self.name_ei_with_regionalized_biosphere = ecoinvent_database_name + ' regionalized'
         self.name_spatialized_biosphere = 'biosphere3_spatialized_flows'
-        self.cutoff = cutoff
-        self.regio_bio = regionalized_elementary_flows
-        self.trade_conn = sqlite3.connect(trade_database_path)
-        self.ecoinvent_conn = sqlite3.connect(bw2.Database(self.regioinvent_database_name).filepath_processed().split(
-            '\\processed\\')[0] + '\\lci\\databases.db')
-        self.ecoinvent_cursor = self.ecoinvent_conn.cursor()
+        self.ecoinvent_version = ecoinvent_version
+
+        # self.regio_bio = spatialized_elementary_flows
+        # self.regioinvent_database_name = regioinvent_database_name
+        # self.cutoff = cutoff
+        # self.trade_conn = sqlite3.connect(trade_database_path)
+        # self.ecoinvent_conn = sqlite3.connect(bw2.Database(self.regioinvent_database_name).filepath_processed().split(
+        #     '\\processed\\')[0] + '\\lci\\databases.db')
+        # self.ecoinvent_cursor = self.ecoinvent_conn.cursor()
 
         # load data from the different mapping files and such
         with open(pkg_resources.resource_filename(__name__, '/Data/ecoinvent_to_HS.json'), 'r') as f:
@@ -96,220 +97,175 @@ class Regioinvent:
         self.regioinvent_in_wurst = []
         self.regioinvent_in_dict = {}
         self.ei_regio_data = {}
+        self.ei_wurst = []
+        self.ei_in_dict = {}
         self.distribution_technologies = {}
         self.transportation_modes = {}
         self.created_geographies = dict.fromkeys(self.eco_to_hs_class.keys())
         self.unit = dict.fromkeys(self.eco_to_hs_class.keys())
-        self.base_iw_water_flows = ['Water',
-                                    'Water, cooling, unspecified natural origin',
-                                    'Water, lake',
-                                    'Water, river',
-                                    'Water, turbine use, unspecified natural origin',
-                                    'Water, unspecified natural origin',
-                                    'Water, well, in ground']
-        self.base_iw_land_flows = ['Occupation, agriculture, mosaic (agroforestry)',
-                                   'Occupation, annual crops',
-                                   'Occupation, artificial areas',
-                                   'Occupation, forest, used',
-                                   'Occupation, forest/grassland, not used',
-                                   'Occupation, pasture/meadow',
-                                   'Occupation, permanent crops',
-                                   'Occupation, secondary vegetation',
-                                   'Occupation, unspecified',
-                                   'Occupation, agriculture, mosaic (agroforestry)',
-                                   'Transformation, from annual crops',
-                                   'Transformation, from artificial areas',
-                                   'Transformation, from forest, used',
-                                   'Transformation, from forest/grassland, not used',
-                                   'Transformation, from pasture/meadow',
-                                   'Transformation, from permanent crops',
-                                   'Transformation, from secondary vegetation',
-                                   'Transformation, from unspecified',
-                                   'Transformation, to agriculture, mosaic (agroforestry)',
-                                   'Transformation, to annual crops',
-                                   'Transformation, to artificial areas',
-                                   'Transformation, to forest, used',
-                                   'Transformation, to forest/grassland, not used',
-                                   'Transformation, to pasture/meadow',
-                                   'Transformation, to permanent crops',
-                                   'Transformation, to secondary vegetation',
-                                   'Transformation, to unspecified']
-        self.base_iw_acid_eutro_flows = ['Ammonia',
-                                         'Ammonia, as N',
-                                         'Ammonium carbonate',
-                                         'Ammonium nitrate',
-                                         'Ammonium, ion',
-                                         'Dinitrogen monoxide',
-                                         'Kjeldahl-N',
-                                         'Nitrate',
-                                         'Nitric acid',
-                                         'Nitric oxide',
-                                         'Nitrite',
-                                         'Nitrogen dioxide',
-                                         'Nitrogen oxides',
-                                         'Nitrogen',
-                                         'Nitrogen, organic bound',
-                                         'Nitrogen, total',
-                                         'Sulfate',
-                                         'Sulfur dioxide',
-                                         'Sulfur trioxide',
-                                         'Sulfuric acid',
-                                         'BOD5, Biological Oxygen Demand',
-                                         'COD, Chemical Oxygen Demand',
-                                         'Phosphate',
-                                         'Phosphoric acid',
-                                         'Phosphorus compounds, unspecified',
-                                         'Phosphorus pentoxide',
-                                         'Phosphorus',
-                                         'Phosphorus, total']
 
-        if self.regio_bio:
-            if self.name_spatialized_biosphere not in bw2.databases:
-                self.logger.info("Creating regionalized biosphere flows...")
-                self.create_regionalized_biosphere_flows()
-            if 'IMPACT World+ Damage 2.0.1_regionalized' not in [i[0] for i in list(bw2.methods)]:
-                self.logger.info("Importing regionalized LCIA method...")
-                self.importing_impact_world_plus()
-            if self.name_ei_with_regionalized_biosphere not in bw2.databases:
-                self.logger.info("Extracting ecoinvent to wurst...")
-                self.ei_wurst = wurst.extract_brightway2_databases(self.ecoinvent_database_name, add_identifiers=True)
-                self.ei_in_dict = {(i['reference product'], i['location'], i['name']): i for i in self.ei_wurst}
-                self.create_ecoinvent_with_regionalized_biosphere_flows()
-            elif self.name_ei_with_regionalized_biosphere in bw2.databases:
-                self.logger.info("Extracting ecoinvent to wurst...")
-                self.ei_wurst = wurst.extract_brightway2_databases(self.name_ei_with_regionalized_biosphere,
-                                                                   add_identifiers=True)
+        # if self.regio_bio:
+        #     if self.name_spatialized_biosphere not in bw2.databases:
+        #         self.logger.info("Creating regionalized biosphere flows...")
+        #         self.create_regionalized_biosphere_flows()
+        #     if 'IMPACT World+ Damage 2.0.1_regionalized' not in [i[0] for i in list(bw2.methods)]:
+        #         self.logger.info("Importing regionalized LCIA method...")
+        #         self.importing_impact_world_plus()
+        #     if self.name_ei_with_regionalized_biosphere not in bw2.databases:
+        #         self.logger.info("Extracting ecoinvent to wurst...")
+        #         self.ei_wurst = wurst.extract_brightway2_databases(self.ecoinvent_database_name, add_identifiers=True)
+        #         self.ei_in_dict = {(i['reference product'], i['location'], i['name']): i for i in self.ei_wurst}
+        #         self.create_ecoinvent_with_regionalized_biosphere_flows()
+        #     elif self.name_ei_with_regionalized_biosphere in bw2.databases:
+        #         self.logger.info("Extracting ecoinvent to wurst...")
+        #         self.ei_wurst = wurst.extract_brightway2_databases(self.name_ei_with_regionalized_biosphere,
+        #                                                            add_identifiers=True)
+        # else:
+        #     if self.name_ei_with_regionalized_biosphere not in bw2.databases:
+        #         self.logger.info("Extracting ecoinvent to wurst...")
+        #         self.ei_wurst = wurst.extract_brightway2_databases(self.ecoinvent_database_name, add_identifiers=True)
+        #         self.create_ecoinvent_copy_without_regionalized_biosphere_flows()
+        #     elif self.name_ei_with_regionalized_biosphere in bw2.databases:
+        #         self.logger.info("Extracting ecoinvent to wurst...")
+        #         self.ei_wurst = wurst.extract_brightway2_databases(self.name_ei_with_regionalized_biosphere,
+        #                                                            add_identifiers=True)
+        #
+        # # as a dictionary to speed things up later
+        # self.ei_in_dict = {(i['reference product'], i['location'], i['name']): i for i in self.ei_wurst}
+
+    def spatialize_my_ecoinvent(self):
+        """
+        Function creates a copy of the original ecoinvent database and modifies this copy to spatialize the elementary
+        flows used by ecoinvent. It also creates additional technosphere water processes to remediate imbalances due to
+        technosphere misrepresentations.
+
+        :return: nothing but creates multiple databases in your brightway2 project
+        """
+
+        # ---------------------------- Create the spatialized biosphere ----------------------------
+
+        if 'biosphere3_spatialized_flows' not in bw2.databases:
+            # load the correct pickle file with the different spatialized elementary flows metadata
+            with open(pkg_resources.resource_filename(
+                    __name__, '/Data/Spatialization_of_elementary_flows/ei' + self.ecoinvent_version +
+                              '/spatialized_biosphere_database.pickle'), 'rb') as f:
+                spatialized_biosphere = pickle.load(f)
+            # create the new biosphere3 database with spatialized elementary flows
+            bw2.Database(self.name_spatialized_biosphere).write(spatialized_biosphere)
         else:
-            if self.name_ei_with_regionalized_biosphere not in bw2.databases:
-                self.logger.info("Extracting ecoinvent to wurst...")
-                self.ei_wurst = wurst.extract_brightway2_databases(self.ecoinvent_database_name, add_identifiers=True)
-                self.create_ecoinvent_copy_without_regionalized_biosphere_flows()
-            elif self.name_ei_with_regionalized_biosphere in bw2.databases:
-                self.logger.info("Extracting ecoinvent to wurst...")
-                self.ei_wurst = wurst.extract_brightway2_databases(self.name_ei_with_regionalized_biosphere,
-                                                                   add_identifiers=True)
+            self.logger.info("biosphere3_spatialized_flows already exists in this project.")
 
-        # as a dictionary to speed things up later
-        self.ei_in_dict = {(i['reference product'], i['location'], i['name']): i for i in self.ei_wurst}
+        # ---------------------------- Spatialize ecoinvent ----------------------------
 
-    def create_regionalized_biosphere_flows(self):
-        """
-        Function creates a regionalized version of the biosphere3 database of a brightway2 project
-        """
+        if self.name_ei_with_regionalized_biosphere not in bw2.databases:
+            # transform format of ecoinvent to wurst format for speed-up
+            self.logger.info("Extracting ecoinvent to wurst...")
+            self.ei_wurst = wurst.extract_brightway2_databases(self.ecoinvent_database_name, add_identifiers=True)
 
-        with open(pkg_resources.resource_filename(__name__, '/Data/regionalized_biosphere_database.pickle'), 'rb') as f:
-            regionalized_biosphere = pickle.load(f)
+            # also get ecoinvent in a format for more efficient searching
+            self.ei_in_dict = {(i['reference product'], i['location'], i['name']): i for i in self.ei_wurst}
 
-        bw2.Database(self.name_spatialized_biosphere).write(regionalized_biosphere)
+            # load the list of the base name of all spatialized elementary flows
+            with open(pkg_resources.resource_filename(
+                    __name__, '/Data/Spatialization_of_elementary_flows/ei3.10/spatialized_elementary_flows.json'), 'r') as f:
+                base_spatialized_flows = json.load(f)
 
-    def importing_impact_world_plus(self):
-        """
-        Function loads the IMPACT World+ LCIA methodology, the fully regionalized version
-        """
+            # store the codes of the spatialized flows in a dictionary
+            spatialized_flows = {(i.as_dict()['name'], i.as_dict()['categories']): i.as_dict()['code'] for i in
+                                 bw2.Database(self.name_spatialized_biosphere)}
 
-        bw2.BW2Package.import_file(pkg_resources.resource_filename(
-            __name__, '/Data/impact_world_plus_201_regionalized.ea4b5ad0766f4bb60242724bd3ee92ec.bw2package'))
+            self.logger.info("Fixing water processes in ecoinvent...")
+            self.fix_ecoinvent_water()
 
-    def create_ecoinvent_with_regionalized_biosphere_flows(self):
-        """
-        Function regionalizes the water biosphere flows of the ecoinvent database
-        :return: self.new_regionalized_ecoinvent_database_name
-        """
+            self.logger.info("Spatializing ecoinvent...")
+            # loop through the whole ecoinvent database
+            for process in self.ei_wurst:
+                # create a copy, but in the new ecoinvent database
+                process['database'] = self.name_ei_with_regionalized_biosphere
+                # loop through exchanges of a process
+                for exc in process['exchanges']:
+                    # if it's a biosphere exchange
+                    if exc['type'] == 'biosphere':
+                        # check if it's a flow that should be spatialized
+                        if exc['name'] in base_spatialized_flows:
+                            # to spatialize it, we need to get the uuid of the spatialized flow
+                            exc['code'] = spatialized_flows[(exc['name'] + ', ' + process['location'], exc['categories'])]
+                            # change the database of the exchange as well
+                            exc['database'] = self.name_spatialized_biosphere
+                            # update its name
+                            exc['name'] = exc['name'] + ', ' + process['location']
+                            # and finally its input
+                            exc['input'] = (exc['database'], exc['code'])
+                    # if it's a technosphere exchange, just update the database value
+                    else:
+                        exc['database'] = self.name_ei_with_regionalized_biosphere
 
-        self.logger.info("Regionalizing the biosphere inputs of the original ecoinvent database...")
+            # sometimes input keys disappear with wurst, make sure there is always one
+            for pr in self.ei_wurst:
+                for exc in pr['exchanges']:
+                    try:
+                        exc['input']
+                    except KeyError:
+                        exc['input'] = (exc['database'], exc['code'])
 
-        base_regionalized_flows = set([', '.join(i.as_dict()['name'].split(', ')[:-1]) for i in
-                                       bw2.Database(self.name_spatialized_biosphere)])
-        regionalized_flows = {(i.as_dict()['name'], i.as_dict()['categories']): i.as_dict()['code'] for i in
-                              bw2.Database(self.name_spatialized_biosphere)}
-        ei_iw_geo_mapping = pd.read_excel(pkg_resources.resource_filename(
-            __name__, '/Data/ei_iw_geo_mapping.xlsx')).fillna('NA').set_index('ecoinvent')
+            # modify structure of data from wurst to bw2
+            self.ei_regio_data = {(i['database'], i['code']): i for i in self.ei_wurst}
 
-        self.fix_ecoinvent_water()
-
-        for process in self.ei_wurst:
-            process['database'] = self.name_ei_with_regionalized_biosphere
-            for exc in process['exchanges']:
-                if exc['type'] == 'biosphere':
-                    if exc['name'] in base_regionalized_flows:
-                        if 'Water' in exc['name']:
-                            if (exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'water'],
-                                exc['categories']) in regionalized_flows.keys():
-                                exc['code'] = regionalized_flows[(
-                                exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'water'],
-                                exc['categories'])]
-                                exc['database'] = self.name_spatialized_biosphere
-                                exc['name'] = exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'water']
-                                exc['input'] = (exc['database'], exc['code'])
-                        elif 'Occupation' in exc['name'] or 'Transformation' in exc['name']:
-                            if (exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'land'],
-                                exc['categories']) in regionalized_flows.keys():
-                                exc['code'] = regionalized_flows[(
-                                exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'land'],
-                                exc['categories'])]
-                                exc['database'] = self.name_spatialized_biosphere
-                                exc['name'] = exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'land']
-                                exc['input'] = (exc['database'], exc['code'])
-                            elif (exc['name'] + ', GLO', exc['categories']) in regionalized_flows.keys():
-                                exc['code'] = regionalized_flows[(exc['name'] + ', GLO', exc['categories'])]
-                                exc['database'] = self.name_spatialized_biosphere
-                                exc['name'] = exc['name'] + ', GLO'
-                                exc['input'] = (exc['database'], exc['code'])
-                        elif exc['name'] in ['BOD5, Biological Oxygen Demand', 'COD, Chemical Oxygen Demand',
-                                             'Phosphoric acid', 'Phosphorus']:
-                            if (exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'eutro'],
-                                exc['categories']) in regionalized_flows.keys():
-                                exc['code'] = regionalized_flows[(
-                                exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'eutro'],
-                                exc['categories'])]
-                                exc['database'] = self.name_spatialized_biosphere
-                                exc['name'] = exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'eutro']
-                                exc['input'] = (exc['database'], exc['code'])
-                        else:
-                            if (exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'acid'],
-                                exc['categories']) in regionalized_flows.keys():
-                                exc['code'] = regionalized_flows[(
-                                exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'acid'],
-                                exc['categories'])]
-                                exc['database'] = self.name_spatialized_biosphere
-                                exc['name'] = exc['name'] + ', ' + ei_iw_geo_mapping.loc[process['location'], 'acid']
-                                exc['input'] = (exc['database'], exc['code'])
-                else:
-                    exc['database'] = self.name_ei_with_regionalized_biosphere
-
-        # add input key to each exchange
-        for pr in self.ei_wurst:
-            for exc in pr['exchanges']:
+            # same as before, ensure input key is here
+            for pr in self.ei_regio_data:
+                for exc in self.ei_regio_data[pr]['exchanges']:
+                    try:
+                        exc['input']
+                    except KeyError:
+                        exc['input'] = (exc['database'], exc['code'])
+            # wurst creates empty categories for technsphere activities, delete those
+            for pr in self.ei_regio_data:
                 try:
-                    exc['input']
+                    del self.ei_regio_data[pr]['categories']
                 except KeyError:
-                    exc['input'] = (exc['database'], exc['code'])
-
-        # modify structure of data from wurst to bw2
-        self.ei_regio_data = {(i['database'], i['code']): i for i in self.ei_wurst}
-
-        # recreate inputs in edges (exchanges)
-        for pr in self.ei_regio_data:
-            for exc in self.ei_regio_data[pr]['exchanges']:
+                    pass
+            # same with parameters
+            for pr in self.ei_regio_data:
                 try:
-                    exc['input']
+                    del self.ei_regio_data[pr]['parameters']
                 except KeyError:
-                    exc['input'] = (exc['database'], exc['code'])
-        # wurst creates empty categories for activities, this creates an issue when you try to write the bw2 database
-        for pr in self.ei_regio_data:
-            try:
-                del self.ei_regio_data[pr]['categories']
-            except KeyError:
-                pass
-        # same with parameters
-        for pr in self.ei_regio_data:
-            try:
-                del self.ei_regio_data[pr]['parameters']
-            except KeyError:
-                pass
+                    pass
 
-        # write ecoinvent-regionalized database
-        bw2.Database(self.name_ei_with_regionalized_biosphere).write(self.ei_regio_data)
+            # write the ecoinvent-regionalized database to brightway
+            bw2.Database(self.name_ei_with_regionalized_biosphere).write(self.ei_regio_data)
+        else:
+            self.logger.info("There is already a spatialized version of ecoinvent in your project. Please delete it and re-run.")
+
+    def import_fully_regionalized_impact_method(self, lcia_method):
+        """
+        Function to import a fully regionalized impact method into your brightway project, to-be-used with the
+        spatialized version of ecoinvent. You can choose between IMPACT World+, EF and ReCiPe, or simply all of them.
+
+        :param lcia_method: [str] the name of the LCIA method to be imported to be used with the spatialized ecoinvent,
+                                available methods are "IW v2.1", "EF v3.1", "ReCiPe2016 v1.1 (E)" or "all".
+        :return:
+        """
+
+        if lcia_method == 'all' and self.ecoinvent_version == '3.10':
+            self.logger.info("Importing all available fully regionalized lcia methods for ecoinvent3.10.")
+            bw2.BW2Package.import_file(pkg_resources.resource_filename(
+                __name__,
+                '/Data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v310.0fffd5e3daa5f4cf11ef83e49c375827.bw2package'))
+        if lcia_method == 'all' and self.ecoinvent_version == '3.9.1':
+            self.logger.info("Importing all available fully regionalized lcia methods for ecoinvent3.9.1.")
+
+
+        if lcia_method == "IW v2.1" and self.ecoinvent_version == '3.10':
+            self.logger.info("Importing the fully regionalized version of IMPACT World+ v2.1 for ecoinvent3.10.")
+            bw2.BW2Package.import_file(pkg_resources.resource_filename(
+                __name__,
+                '/Data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v310.0fffd5e3daa5f4cf11ef83e49c375827.bw2package'))
+        elif lcia_method == "IW v2.1" and self.ecoinvent_version == '3.9.1':
+            self.logger.info("Importing the fully regionalized version of IMPACT World+ v2.1 for ecoinvent3.9.1.")
+        elif lcia_method == "EF v3.1":
+            self.logger.info("Importing the fully regionalized version of EF v3.1.")
+        elif lcia_method == "ReCiPe2016 v1.1 (E)":
+            self.logger.info("Importing the fully regionalized version of ReCiPe2016 v1.1 (E).")
 
     def create_ecoinvent_copy_without_regionalized_biosphere_flows(self):
         """
@@ -1037,6 +993,9 @@ class Regioinvent:
             electricity_region = None
             if export_country in self.electricity_geos:
                 electricity_region = export_country
+            elif '-' in export_country:
+                if export_country.split('-')[0] in self.electricity_geos:
+                    electricity_region = export_country.split('-')[0]
             elif export_country != 'RoW' and export_country in self.country_to_ecoinvent_regions and not electricity_region:
                 for potential_region in self.country_to_ecoinvent_regions[export_country]:
                     if potential_region in self.electricity_geos:
@@ -1387,15 +1346,17 @@ class Regioinvent:
         :return:
         """
 
-        with open(pkg_resources.resource_filename(__name__, '/Data/magic_plumbering_geographies.json'), 'r') as f:
-            magic_plumbering_geographies = json.load(f)
+        if self.ecoinvent_version == '3.10':
+            with open(pkg_resources.resource_filename(
+                    __name__, '/Data/Spatialization_of_elementary_flows/ei3.10/ecoinvent_plumbering.json'), 'r') as f:
+                ecoinvent_plumbering = json.load(f)
 
         # first, let's identify which processes need to be created
         techno_water_flows = ['irrigation', 'water, deionised', 'water, ultrapure', 'water, decarbonised',
                               'water, completely softened', 'tap water', 'wastewater, average', 'wastewater, unpolluted']
 
         # here we get all regions of processes using the identified technosphere water flows
-        used_regions = list(magic_plumbering_geographies.keys())
+        used_regions = list(ecoinvent_plumbering.keys())
 
         already_existing = {i: [] for i in techno_water_flows}
         # now we check if some of those already exist in ecoinvent
@@ -1407,31 +1368,28 @@ class Regioinvent:
 
         already_existing = {k: set(already_existing[k]) for k, v in already_existing.items()}
 
-        # remove sub-national flows (does not work with IW+ v2.0.1)
-        used_regions = [i.split('-')[0] if i.split('-')[0] in ['CA', 'BR', 'CN', 'IN', 'US'] else i for i in used_regions]
-        # remove regions for which no regionalized water flows exist
-        used_regions = [magic_plumbering_geographies[i][1] for i in used_regions]
-        used_regions = set(used_regions)
-
-        # copying relevant market process
+        # first we go through the market processes
         for techno in techno_water_flows:
+            # loop through the different regions using these processes
             for region in used_regions:
+                # if a process for the region does not exist, we create that process
                 if region not in already_existing[techno]:
-                    if magic_plumbering_geographies[region] == 'RoW':
+                    # for regions based on a copy of RoW, simply copy the "RoW" process
+                    if ecoinvent_plumbering[region] == 'RoW':
                         market_ds = copy.deepcopy(
-                            self.ei_in_dict[(techno, magic_plumbering_geographies[region][0], 'market for ' + techno)])
+                            self.ei_in_dict[(techno, ecoinvent_plumbering[region], 'market for ' + techno)])
                     # for European countries, multiple possibilities
                     else:
-                        # the RER location could be defined for the techno_water_flow
+                        # some processes use the "RER" geography
                         try:
                             market_ds = copy.deepcopy(
-                                self.ei_in_dict[(techno, magic_plumbering_geographies[region][0], 'market for ' + techno)])
+                                self.ei_in_dict[(techno, ecoinvent_plumbering[region], 'market for ' + techno)])
                         except KeyError:
-                            # if not we check for Europe without Switzerland
+                            # others use "Europe without Switzerland"
                             try:
                                 market_ds = copy.deepcopy(
                                     self.ei_in_dict[(techno, 'Europe without Switzerland', 'market for ' + techno)])
-                            # and if nothing works we take RoW
+                            # and if nothing works we take "RoW"
                             except KeyError:
                                 market_ds = copy.deepcopy(self.ei_in_dict[(techno, 'RoW', 'market for ' + techno)])
 
@@ -1439,39 +1397,46 @@ class Regioinvent:
                     name = market_ds['name']
                     product = market_ds['reference product']
                     original_region = market_ds['location']
-                    market_ds[
-                        'comment'] = f'This process is a regionalized adaptation of the following process of the ecoinvent database: {name} | {product} | {original_region}. No amount values were modified in the regionalization process, only their origin.'
+                    market_ds['comment'] = f'This process is a regionalized adaptation of the following process of the ecoinvent database: {name} | {product} | {original_region}. No amount values were modified in the regionalization process, only their origin.'
                     market_ds['location'] = region
                     market_ds['code'] = uuid.uuid4().hex
                     market_ds['database'] = self.name_ei_with_regionalized_biosphere
                     market_ds['input'] = (market_ds['database'], market_ds['code'])
-                    market_ds['exchanges'][0]['code'] = market_ds['code']
-                    market_ds['exchanges'][0]['database'] = self.name_ei_with_regionalized_biosphere
-                    market_ds['exchanges'][0]['location'] = market_ds['location']
-                    market_ds['exchanges'][0]['input'] = (self.name_ei_with_regionalized_biosphere, market_ds['code'])
+                    # adapt the metadata of the production flow itself
+                    [i for i in market_ds['exchanges'] if i['type'] == 'production'][0]['code'] = market_ds['code']
+                    [i for i in market_ds['exchanges'] if i['type'] == 'production'][0][
+                        'database'] = self.name_ei_with_regionalized_biosphere
+                    [i for i in market_ds['exchanges'] if i['type'] == 'production'][0]['location'] = market_ds[
+                        'location']
+                    [i for i in market_ds['exchanges'] if i['type'] == 'production'][0]['input'] = (
+                        self.name_ei_with_regionalized_biosphere, market_ds['code'])
 
                     self.ei_wurst.append(market_ds)
 
-        # copy relevant production processes
+        # then we go through the production processes
         for techno in techno_water_flows:
+            # filter specific technologies
             if techno in ['water, deionised', 'water, ultrapure', 'water, decarbonised', 'water, completely softened']:
+                # loop through the different regions using these processes
                 for region in used_regions:
+                    # if a process for the region does not exist, we create that process
                     if region not in already_existing[techno]:
-                        if magic_plumbering_geographies[region][0] == 'RoW':
+                        # for regions based on a copy of RoW, simply copy the "RoW" process
+                        if ecoinvent_plumbering[region] == 'RoW':
                             production_ds = copy.deepcopy(self.ei_in_dict[(
-                            techno, magic_plumbering_geographies[region][0], techno.replace('water', 'water production'))])
+                                techno, ecoinvent_plumbering[region], techno.replace('water', 'water production'))])
                         # for European countries, multiple possibilities
                         else:
-                            # the RER location could be defined for the techno_water_flow
+                            # some processes use the "RER" geography
                             try:
                                 production_ds = copy.deepcopy(self.ei_in_dict[(
-                                techno, magic_plumbering_geographies[region][0],
-                                techno.replace('water', 'water production'))])
+                                    techno, ecoinvent_plumbering[region], techno.replace('water', 'water production'))])
                             except KeyError:
-                                # if not we check for Europe without Switzerland
+                                # others use "Europe without Switzerland"
                                 try:
                                     production_ds = copy.deepcopy(self.ei_in_dict[(
-                                    techno, 'Europe without Switzerland', techno.replace('water', 'water production'))])
+                                        techno, 'Europe without Switzerland',
+                                        techno.replace('water', 'water production'))])
                                 # and if nothing works we take RoW
                                 except KeyError:
                                     production_ds = copy.deepcopy(
@@ -1487,13 +1452,18 @@ class Regioinvent:
                         production_ds['code'] = uuid.uuid4().hex
                         production_ds['database'] = self.name_ei_with_regionalized_biosphere
                         production_ds['input'] = (production_ds['database'], production_ds['code'])
-                        production_ds['exchanges'][0]['code'] = production_ds['code']
-                        production_ds['exchanges'][0]['database'] = self.name_ei_with_regionalized_biosphere
-                        production_ds['exchanges'][0]['location'] = production_ds['location']
-                        production_ds['exchanges'][0]['input'] = (
+                        # adapt the metadata of the production flow itself
+                        [i for i in production_ds['exchanges'] if i['type'] == 'production'][0]['code'] = production_ds[
+                            'code']
+                        [i for i in production_ds['exchanges'] if i['type'] == 'production'][0][
+                            'database'] = self.name_ei_with_regionalized_biosphere
+                        [i for i in production_ds['exchanges'] if i['type'] == 'production'][0]['location'] = \
+                        production_ds[
+                            'location']
+                        [i for i in production_ds['exchanges'] if i['type'] == 'production'][0]['input'] = (
                             self.name_ei_with_regionalized_biosphere, production_ds['code'])
 
-                        # regionalize created process
+                        # need to regionalize created process
                         if self.test_input_presence(production_ds, 'electricity', extra='aluminium/electricity'):
                             production_ds = self.change_aluminium_electricity(production_ds, region)
                         elif self.test_input_presence(production_ds, 'electricity', extra='cobalt/electricity'):
@@ -1515,34 +1485,45 @@ class Regioinvent:
                                                              'heat, central or small-scale, other than natural gas')
 
                         self.ei_wurst.append(production_ds)
-
+            # filter specific technologies
             if techno in ['wastewater, average', 'wastewater, unpolluted']:
+                # loop through the different regions using these processes
                 for region in used_regions:
+                    # if a process for the region does not exist, we create that process
                     if region not in already_existing[techno]:
-                        if magic_plumbering_geographies[region][0] == 'RoW':
+                        # for regions based on a copy of RoW, simply copy the "RoW" process
+                        if ecoinvent_plumbering[region] == 'RoW':
                             production_ds = copy.deepcopy(
                                 self.ei_in_dict[(techno, 'RoW', 'treatment of ' + techno + ', wastewater treatment')])
                         else:
                             try:
                                 production_ds = copy.deepcopy(self.ei_in_dict[(
-                                    techno, 'Europe without Switzerland', 'treatment of ' + techno + ', wastewater treatment')])
+                                    techno, 'Europe without Switzerland',
+                                    'treatment of ' + techno + ', wastewater treatment')])
                             except KeyError:
                                 production_ds = copy.deepcopy(
-                                    self.ei_in_dict[(techno, 'RoW', 'treatment of ' + techno + ', wastewater treatment')])
+                                    self.ei_in_dict[
+                                        (techno, 'RoW', 'treatment of ' + techno + ', wastewater treatment')])
 
                         # adapt metadata to newly created regionalized process
                         name = production_ds['name']
                         product = production_ds['reference product']
                         original_region = production_ds['location']
-                        production_ds['comment'] = f'This process is a regionalized adaptation of the following process of the ecoinvent database: {name} | {product} | {original_region}. No amount values were modified in the regionalization process, only their origin.'
+                        production_ds[
+                            'comment'] = f'This process is a regionalized adaptation of the following process of the ecoinvent database: {name} | {product} | {original_region}. No amount values were modified in the regionalization process, only their origin.'
                         production_ds['location'] = region
                         production_ds['code'] = uuid.uuid4().hex
                         production_ds['database'] = self.name_ei_with_regionalized_biosphere
                         production_ds['input'] = (production_ds['database'], production_ds['code'])
-                        production_ds['exchanges'][0]['code'] = production_ds['code']
-                        production_ds['exchanges'][0]['database'] = self.name_ei_with_regionalized_biosphere
-                        production_ds['exchanges'][0]['location'] = production_ds['location']
-                        production_ds['exchanges'][0]['input'] = (
+                        # adapt the metadata of the production flow itself
+                        [i for i in production_ds['exchanges'] if i['type'] == 'production'][0]['code'] = production_ds[
+                            'code']
+                        [i for i in production_ds['exchanges'] if i['type'] == 'production'][0][
+                            'database'] = self.name_ei_with_regionalized_biosphere
+                        [i for i in production_ds['exchanges'] if i['type'] == 'production'][0]['location'] = \
+                        production_ds[
+                            'location']
+                        [i for i in production_ds['exchanges'] if i['type'] == 'production'][0]['input'] = (
                             self.name_ei_with_regionalized_biosphere, production_ds['code'])
 
                         # regionalize created process
@@ -1567,20 +1548,24 @@ class Regioinvent:
                                                              'heat, central or small-scale, other than natural gas')
 
                         self.ei_wurst.append(production_ds)
-
+            # filter specific technologies
             if techno == 'irrigation':
+                # loop through the different regions using these processes
                 for region in used_regions:
+                    # if a process for the region does not exist, we create that process
                     if region not in already_existing[techno]:
+                        # for the technology "irrigation" there are multiple "sub-technologies" available
                         for irrigation_type in ['irrigation, drip', 'irrigation, surface', 'irrigation, sprinkler']:
-                            if magic_plumbering_geographies[region][0] == 'RoW':
+                            # for regions based on a copy of RoW, simply copy the "RoW" process
+                            if ecoinvent_plumbering[region] == 'RoW':
                                 production_ds = copy.deepcopy(
-                                    self.ei_in_dict[(techno, magic_plumbering_geographies[region][0], irrigation_type)])
+                                    self.ei_in_dict[(techno, ecoinvent_plumbering[region], irrigation_type)])
                             # for European countries, multiple possibilities
                             else:
                                 # the RER location could be defined for the techno_water_flow
                                 try:
                                     production_ds = copy.deepcopy(
-                                        self.ei_in_dict[(techno, magic_plumbering_geographies[region][0], irrigation_type)])
+                                        self.ei_in_dict[(techno, ecoinvent_plumbering[region], irrigation_type)])
                                 except KeyError:
                                     # if not we check for Europe without Switzerland
                                     try:
@@ -1594,15 +1579,21 @@ class Regioinvent:
                             name = production_ds['name']
                             product = production_ds['reference product']
                             original_region = production_ds['location']
-                            production_ds['comment'] = f'This process is a regionalized adaptation of the following process of the ecoinvent database: {name} | {product} | {original_region}. No amount values were modified in the regionalization process, only their origin.'
+                            production_ds[
+                                'comment'] = f'This process is a regionalized adaptation of the following process of the ecoinvent database: {name} | {product} | {original_region}. No amount values were modified in the regionalization process, only their origin.'
                             production_ds['location'] = region
                             production_ds['code'] = uuid.uuid4().hex
                             production_ds['database'] = self.name_ei_with_regionalized_biosphere
                             production_ds['input'] = (production_ds['database'], production_ds['code'])
-                            production_ds['exchanges'][0]['code'] = production_ds['code']
-                            production_ds['exchanges'][0]['database'] = self.name_ei_with_regionalized_biosphere
-                            production_ds['exchanges'][0]['location'] = production_ds['location']
-                            production_ds['exchanges'][0]['input'] = (
+                            # adapt the metadata of the production flow itself
+                            [i for i in production_ds['exchanges'] if i['type'] == 'production'][0]['code'] = \
+                            production_ds['code']
+                            [i for i in production_ds['exchanges'] if i['type'] == 'production'][0][
+                                'database'] = self.name_ei_with_regionalized_biosphere
+                            [i for i in production_ds['exchanges'] if i['type'] == 'production'][0]['location'] = \
+                            production_ds[
+                                'location']
+                            [i for i in production_ds['exchanges'] if i['type'] == 'production'][0]['input'] = (
                                 self.name_ei_with_regionalized_biosphere, production_ds['code'])
 
                             # regionalize created process
@@ -1627,10 +1618,13 @@ class Regioinvent:
                                                                  'heat, central or small-scale, other than natural gas')
 
                             self.ei_wurst.append(production_ds)
-
+            # filter specific technologies
             if techno == 'tap water':
+                # loop through the different regions using these processes
                 for region in used_regions:
+                    # if a process for the region does not exist, we create that process
                     if region not in already_existing[techno]:
+                        # for the technology "tap water" there are multiple "sub-technologies" available
                         for tap_water_techno in ['tap water production, artificial recharged wells',
                                                  'tap water production, conventional treatment',
                                                  'tap water production, conventional with biological treatment',
@@ -1646,32 +1640,43 @@ class Regioinvent:
                                                  'tap water production, underground water with chemical treatment',
                                                  'tap water production, underground water with disinfection',
                                                  'tap water production, underground water without treatment']:
-                            if magic_plumbering_geographies[region][0] == 'RoW':
+                            # for regions based on a copy of RoW, simply copy the "RoW" process
+                            if ecoinvent_plumbering[region] == 'RoW':
+                                # tap water production with seawater reverse osmosis is only available at GLO level
                                 if 'seawater reverse osmosis' in tap_water_techno:
                                     production_ds = copy.deepcopy(self.ei_in_dict[(techno, 'GLO', tap_water_techno)])
+                                # others are available with RoW
                                 else:
                                     production_ds = copy.deepcopy(self.ei_in_dict[(techno, 'RoW', tap_water_techno)])
                             else:
+                                # tap water production with seawater reverse osmosis is only available at GLO level
                                 if 'seawater reverse osmosis' not in tap_water_techno:
                                     try:
                                         production_ds = copy.deepcopy(
                                             self.ei_in_dict[(techno, 'Europe without Switzerland', tap_water_techno)])
                                     except KeyError:
-                                        production_ds = copy.deepcopy(self.ei_in_dict[(techno, 'RoW', tap_water_techno)])
+                                        production_ds = copy.deepcopy(
+                                            self.ei_in_dict[(techno, 'RoW', tap_water_techno)])
 
                             # adapt metadata to newly created regionalized process
                             name = production_ds['name']
                             product = production_ds['reference product']
                             original_region = production_ds['location']
-                            production_ds['comment'] = f'This process is a regionalized adaptation of the following process of the ecoinvent database: {name} | {product} | {original_region}. No amount values were modified in the regionalization process, only their origin.'
+                            production_ds[
+                                'comment'] = f'This process is a regionalized adaptation of the following process of the ecoinvent database: {name} | {product} | {original_region}. No amount values were modified in the regionalization process, only their origin.'
                             production_ds['location'] = region
                             production_ds['code'] = uuid.uuid4().hex
                             production_ds['database'] = self.name_ei_with_regionalized_biosphere
                             production_ds['input'] = (production_ds['database'], production_ds['code'])
-                            production_ds['exchanges'][0]['code'] = production_ds['code']
-                            production_ds['exchanges'][0]['database'] = self.name_ei_with_regionalized_biosphere
-                            production_ds['exchanges'][0]['location'] = production_ds['location']
-                            production_ds['exchanges'][0]['input'] = (
+                            # adapt the metadata of the production flow itself
+                            [i for i in production_ds['exchanges'] if i['type'] == 'production'][0]['code'] = \
+                            production_ds['code']
+                            [i for i in production_ds['exchanges'] if i['type'] == 'production'][0][
+                                'database'] = self.name_ei_with_regionalized_biosphere
+                            [i for i in production_ds['exchanges'] if i['type'] == 'production'][0]['location'] = \
+                            production_ds[
+                                'location']
+                            [i for i in production_ds['exchanges'] if i['type'] == 'production'][0]['input'] = (
                                 self.name_ei_with_regionalized_biosphere, production_ds['code'])
 
                             # regionalize created process
@@ -1700,27 +1705,35 @@ class Regioinvent:
         # need to re-extract the dictionary because we added new processes to ei_wurst
         self.ei_in_dict = {(i['reference product'], i['location'], i['name']): i for i in self.ei_wurst}
 
-        # now ensure that any ecoinvent process uses the newly created regionalized techno_water_flows
+        # final step, make the ecoinvent process use these newly reated regionalized processes
         for process in self.ei_wurst:
+            # loop through exchanges of the process
             for exc in process['exchanges']:
+                # if the exchange is a technosphere exchange
                 if exc['type'] == 'technosphere':
+                    # if the reference product is one of the technology producing water
                     if exc['product'] in techno_water_flows:
+                        # if the location if not part of the already existing processes
                         if process['location'] not in already_existing[exc['product']]:
-                            if (not (exc['product'] == 'water, decarbonised' and exc[
-                                'name'] == 'diethyl ether production') and
-                                    not (exc['product'] == 'water, ultrapure' and process['location'] == 'CA-QC')):
+                            # annoying little flow at 0.0001g/kg of decarbonised water produced in RoW, just remove it
+                            if not (exc['product'] == 'water, decarbonised' and exc[
+                                'name'] == 'diethyl ether production'):
                                 try:
                                     replace_process = self.ei_in_dict[
-                                        (exc['product'], magic_plumbering_geographies[process['location']][1], exc['name'])]
+                                        (exc['product'], process['location'], exc['name'])]
                                 except KeyError:
                                     if exc['name'] == 'market for tap water':
-                                        replace_process = self.ei_in_dict[(
-                                            exc['product'], magic_plumbering_geographies[process['location']][1],
-                                            'market group for tap water')]
+                                        replace_process = self.ei_in_dict[
+                                            (exc['product'], process['location'], 'market group for tap water')]
                                     if exc['name'] == 'market group for tap water':
-                                        replace_process = self.ei_in_dict[(
-                                            exc['product'], magic_plumbering_geographies[process['location']][1],
-                                            'market for tap water')]
+                                        replace_process = self.ei_in_dict[
+                                            (exc['product'], process['location'], 'market for tap water')]
+                                    else:
+                                        try:
+                                            replace_process = self.ei_in_dict[
+                                                (exc['product'], 'Europe without Switzerland', exc['name'])]
+                                        except KeyError:
+                                            print(exc['name'], process['location'], exc['product'], process['name'])
                                 exc['code'] = replace_process['code']
                                 exc['name'] = replace_process['name']
                                 exc['product'] = replace_process['reference product']
