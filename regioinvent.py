@@ -1532,16 +1532,9 @@ class Regioinvent:
             if techno in ['wastewater, average', 'wastewater, unpolluted']:
                 for region in used_regions:
                     if region not in already_existing[techno]:
-                        if magic_plumbering_geographies[region][0] == 'RoW':
-                            production_ds = copy.deepcopy(
-                                self.ei_in_dict[(techno, 'RoW', 'treatment of ' + techno + ', wastewater treatment')])
-                        else:
-                            try:
-                                production_ds = copy.deepcopy(self.ei_in_dict[(
-                                    techno, 'Europe without Switzerland', 'treatment of ' + techno + ', wastewater treatment')])
-                            except KeyError:
-                                production_ds = copy.deepcopy(
-                                    self.ei_in_dict[(techno, 'RoW', 'treatment of ' + techno + ', wastewater treatment')])
+                        # we take the wastewater process of CH instead of RoW
+                        production_ds = copy.deepcopy(
+                            self.ei_in_dict[(techno, 'CH', 'treatment of ' + techno + ', wastewater treatment')])
 
                         # adapt metadata to newly created regionalized process
                         name = production_ds['name']
