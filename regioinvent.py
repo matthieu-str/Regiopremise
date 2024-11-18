@@ -167,7 +167,8 @@ class Regioinvent:
 
             # load the list of the base name of all spatialized elementary flows
             with open(pkg_resources.resource_filename(
-                    __name__, '/Data/Spatialization_of_elementary_flows/ei3.10/spatialized_elementary_flows.json'), 'r') as f:
+                    __name__, '/Data/Spatialization_of_elementary_flows/ei' + self.ecoinvent_version +
+                              '/spatialized_elementary_flows.json'), 'r') as f:
                 base_spatialized_flows = json.load(f)
 
             # store the codes of the spatialized flows in a dictionary
@@ -188,14 +189,17 @@ class Regioinvent:
                     if exc['type'] == 'biosphere':
                         # check if it's a flow that should be spatialized
                         if exc['name'] in base_spatialized_flows:
-                            # to spatialize it, we need to get the uuid of the spatialized flow
-                            exc['code'] = spatialized_flows[(exc['name'] + ', ' + process['location'], exc['categories'])]
-                            # change the database of the exchange as well
-                            exc['database'] = self.name_spatialized_biosphere
-                            # update its name
-                            exc['name'] = exc['name'] + ', ' + process['location']
-                            # and finally its input
-                            exc['input'] = (exc['database'], exc['code'])
+                            # check if the category makes sense (don't regionalize mineral resources for instance)
+                            if exc['categories'][0] in base_spatialized_flows[exc['name']]:
+                                # to spatialize it, we need to get the uuid of the spatialized flow
+                                exc['code'] = spatialized_flows[(exc['name'] + ', ' + process['location'],
+                                                                 exc['categories'])]
+                                # change the database of the exchange as well
+                                exc['database'] = self.name_spatialized_biosphere
+                                # update its name
+                                exc['name'] = exc['name'] + ', ' + process['location']
+                                # and finally its input
+                                exc['input'] = (exc['database'], exc['code'])
                     # if it's a technosphere exchange, just update the database value
                     else:
                         exc['database'] = self.name_ei_with_regionalized_biosphere
@@ -253,7 +257,9 @@ class Regioinvent:
                 '/Data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v310.0fffd5e3daa5f4cf11ef83e49c375827.bw2package'))
         if lcia_method == 'all' and self.ecoinvent_version == '3.9.1':
             self.logger.info("Importing all available fully regionalized lcia methods for ecoinvent3.9.1.")
-
+            bw2.BW2Package.import_file(pkg_resources.resource_filename(
+                __name__,
+                '/Data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v39.af770e84bfd0f4365d509c026796639a.bw2package'))
 
         if lcia_method == "IW v2.1" and self.ecoinvent_version == '3.10':
             self.logger.info("Importing the fully regionalized version of IMPACT World+ v2.1 for ecoinvent3.10.")
@@ -262,6 +268,9 @@ class Regioinvent:
                 '/Data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v310.0fffd5e3daa5f4cf11ef83e49c375827.bw2package'))
         elif lcia_method == "IW v2.1" and self.ecoinvent_version == '3.9.1':
             self.logger.info("Importing the fully regionalized version of IMPACT World+ v2.1 for ecoinvent3.9.1.")
+            bw2.BW2Package.import_file(pkg_resources.resource_filename(
+                __name__,
+                '/Data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v39.af770e84bfd0f4365d509c026796639a.bw2package'))
         elif lcia_method == "EF v3.1":
             self.logger.info("Importing the fully regionalized version of EF v3.1.")
         elif lcia_method == "ReCiPe2016 v1.1 (E)":
@@ -1346,10 +1355,10 @@ class Regioinvent:
         :return:
         """
 
-        if self.ecoinvent_version == '3.10':
-            with open(pkg_resources.resource_filename(
-                    __name__, '/Data/Spatialization_of_elementary_flows/ei3.10/ecoinvent_plumbering.json'), 'r') as f:
-                ecoinvent_plumbering = json.load(f)
+        with open(pkg_resources.resource_filename(
+                __name__, '/Data/Spatialization_of_elementary_flows/ei' + self.ecoinvent_version +
+                          '/ecoinvent_plumbering.json'), 'r') as f:
+            ecoinvent_plumbering = json.load(f)
 
         # first, let's identify which processes need to be created
         techno_water_flows = ['irrigation', 'water, deionised', 'water, ultrapure', 'water, decarbonised',
