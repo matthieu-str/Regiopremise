@@ -520,7 +520,9 @@ class Regioinvent:
                                 regio_process = copy_process(product, technology, potential_region, exporter)
                     # otherwise, take either RoW, GLO or a random available geography
                     if not regio_process:
-                        if 'RoW' in possibilities[technology]:
+                        if 'World' in possibilities[technology]:
+                            regio_process = copy_process(product, technology, 'World', exporter)
+                        elif 'RoW' in possibilities[technology]:
                             regio_process = copy_process(product, technology, 'RoW', exporter)
                         elif 'GLO' in possibilities[technology]:
                             regio_process = copy_process(product, technology, 'GLO', exporter)
@@ -898,7 +900,7 @@ class Regioinvent:
 
         # notice that here we are directly manipulating (through bw2) the already-written ecoinvent database
 
-        consumption_markets_data = {(i['name'], i['location']): i for i in self.regioinvent_in_wurst if
+        consumption_markets_data = {(i['name'], i['location']): i for i in bw2.Database(self.regioinvent_database_name) if
                                     'consumption market' in i['name']}
 
         # first we connect ecoinvent to consumption markets of regioinvent
@@ -921,10 +923,16 @@ class Regioinvent:
                             exc.as_dict()['code'] = (consumption_markets_data[
                                 ('consumption market for ' + exc.as_dict()['product'], location)]['code'])
                         else:
-                            exc.as_dict()['database'] = (consumption_markets_data[
-                                ('consumption market for ' + exc.as_dict()['product'], 'RoW')]['database'])
-                            exc.as_dict()['code'] = (consumption_markets_data[
-                                ('consumption market for ' + exc.as_dict()['product'], 'RoW')]['code'])
+                            try:
+                                exc.as_dict()['database'] = (consumption_markets_data[
+                                    ('consumption market for ' + exc.as_dict()['product'], 'RoW')]['database'])
+                                exc.as_dict()['code'] = (consumption_markets_data[
+                                    ('consumption market for ' + exc.as_dict()['product'], 'RoW')]['code'])
+                            except KeyError:
+                                exc.as_dict()['database'] = (consumption_markets_data[
+                                    ('consumption market for ' + exc.as_dict()['product'], 'World')]['database'])
+                                exc.as_dict()['code'] = (consumption_markets_data[
+                                    ('consumption market for ' + exc.as_dict()['product'], 'World')]['code'])
                         exc.as_dict()['input'] = (exc.as_dict()['database'], exc.as_dict()['code'])
                         exc.save()
 
@@ -1258,10 +1266,11 @@ class Regioinvent:
                                                                ws.contains("name", "market group for")))
 
                 heat_exchanges = {k: v * [i['amount'] for i in global_heat_process['exchanges'] if
-                                          i['location'] == 'RoW'][0] for k, v in heat_exchanges.items()}
-                heat_exchanges[
-                    ([i for i in global_heat_process['exchanges'] if i['location'] == 'CA-QC'][0]['name'], 'CA-QC')] = (
-                    [i for i in global_heat_process['exchanges'] if i['location'] == 'CA-QC'][0]['amount'])
+                                          (i['location'] == 'RoW') | (i['location'] == 'World')][0]
+                                  for k, v in heat_exchanges.items()}
+                # heat_exchanges[
+                #     ([i for i in global_heat_process['exchanges'] if i['location'] == 'CA-QC'][0]['name'], 'CA-QC')] = (
+                #     [i for i in global_heat_process['exchanges'] if i['location'] == 'CA-QC'][0]['amount'])
             # make it relative amounts
             heat_exchanges = {k: v / sum(heat_exchanges.values()) for k, v in heat_exchanges.items()}
             # scale the relative amount to the qty of heat of process
