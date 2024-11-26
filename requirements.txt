@@ -1,6 +1,5 @@
-brightway2==2.4.4
-numpy
+brightway2==2.4.6
+numpy==1.23.5
 pandas==2.1.4
-sqlite3
 tqdm
 wurst>=0.4
