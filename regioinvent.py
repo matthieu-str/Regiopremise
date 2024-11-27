@@ -1736,7 +1736,7 @@ class Regioinvent:
                     # if the reference product is one of the technology producing water
                     if exc['product'] in techno_water_flows:
                         # if the location if not part of the already existing processes
-                        if process['location'] not in already_existing[exc['product']]:
+                        if location not in already_existing[exc['product']]:
                             # annoying little flow at 0.0001g/kg of decarbonised water produced in RoW, just remove it
                             if not (exc['product'] == 'water, decarbonised' and exc['name'] == 'diethyl ether production'):
                                 try:
@@ -1745,10 +1745,10 @@ class Regioinvent:
                                 except KeyError:
                                     if exc['name'] == 'market for tap water':
                                         replace_process = self.ei_in_dict[
-                                            (exc['product'], process['location'], 'market group for tap water')]
+                                            (exc['product'], location, 'market group for tap water')]
                                     if exc['name'] == 'market group for tap water':
                                         replace_process = self.ei_in_dict[
-                                            (exc['product'], process['location'], 'market for tap water')]
+                                            (exc['product'], location, 'market for tap water')]
                                     else:
                                         try:
                                             replace_process = self.ei_in_dict[
