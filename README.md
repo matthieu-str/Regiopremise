@@ -77,16 +77,25 @@ perform your LCAs either through brightway2 or its GUI activity-browser as you w
 Do note that calculations are longer with ```Regioinvent``` (~5 to 10 minutes calculation for the first run). <br>
 There are currently no support for other LCA software, as SimaPro and openLCA are not able to support the size of the database.
 
+## Overview of the methodology
+
+<img src="images/brief_methodo.png" width="600"/>
+
+1. Closest available process in ecoinvent is copied and adapted for electricity, heat and waste inputs
+2. National consumption markets are created based on import and production data
+3. The national consumption markets are connected to the rest of the database
+4. Elementary flows are spatialized
+
+For the detailed methodology, take a look at the Methodology.md file.
+
 ## Adaptations
 - ```Regiopremise``` (https://github.com/matthieu-str/Regiopremise) is an adaptation of regioinvent that can work with the 
 ```premise``` library (https://github.com/polca/premise) and can operate with a regionalized EF3.1 version.
-
-## Documentation
-
-_incoming through a scientific article_
 
 ## Support
 Contact [maxime.agez@polymtl.ca](mailto:maxime.agez@polymtl.ca)
 
 ## Citation
-https://doi.org/10.5281/zenodo.11836126
+Citing the code (take the correct version): https://doi.org/10.5281/zenodo.11836126 <br>
+Citing the article: _article currently in review_ <br>
+Citing BACI: Gaulier, G. and Zignago, S. (2010) BACI: International Trade Database at the Product-Level. The 1994-2007 Version. CEPII Working Paper, N°2010-23.

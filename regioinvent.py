@@ -58,31 +58,42 @@ class Regioinvent:
         self.ecoinvent_version = ecoinvent_version
         # name is fixed
         self.name_spatialized_biosphere = 'biosphere3_spatialized_flows'
+        # parameter useful only for article
+        self.regio_bio = True
 
         # load data from the different mapping files and such
-        with open(pkg_resources.resource_filename(__name__, '/Data/ecoinvent_to_HS.json'), 'r') as f:
+        with open(pkg_resources.resource_filename(__name__, '/Data/Regionalization/ei' + self.ecoinvent_version +
+                                                            '/ecoinvent_to_HS.json'), 'r') as f:
             self.eco_to_hs_class = json.load(f)
-        with open(pkg_resources.resource_filename(__name__, '/Data/HS_to_exiobase_name.json'), 'r') as f:
+        with open(pkg_resources.resource_filename(__name__, '/Data/Regionalization/ei' + self.ecoinvent_version +
+                                                            '/HS_to_exiobase_name.json'), 'r') as f:
             self.hs_class_to_exio = json.load(f)
-        with open(pkg_resources.resource_filename(__name__, '/Data/country_to_ecoinvent_regions.json'), 'r') as f:
+        with open(pkg_resources.resource_filename(__name__, '/Data/Regionalization/ei' + self.ecoinvent_version +
+                                                            '/country_to_ecoinvent_regions.json'), 'r') as f:
             self.country_to_ecoinvent_regions = json.load(f)
-        with open(pkg_resources.resource_filename(__name__, '/Data/electricity_processes.json'), 'r') as f:
+        with open(pkg_resources.resource_filename(__name__, '/Data/Regionalization/ei' + self.ecoinvent_version +
+                                                            '/electricity_processes.json'), 'r') as f:
             self.electricity_geos = json.load(f)
-        with open(pkg_resources.resource_filename(__name__, '/Data/electricity_aluminium_processes.json'), 'r') as f:
+        with open(pkg_resources.resource_filename(__name__, '/Data/Regionalization/ei' + self.ecoinvent_version +
+                                                            '/electricity_aluminium_processes.json'), 'r') as f:
             self.electricity_aluminium_geos = json.load(f)
-        with open(pkg_resources.resource_filename(__name__, '/Data/waste_processes.json'), 'r') as f:
+        with open(pkg_resources.resource_filename(__name__, '/Data/Regionalization/ei' + self.ecoinvent_version +
+                                                            '/waste_processes.json'), 'r') as f:
             self.waste_geos = json.load(f)
-        with open(pkg_resources.resource_filename(__name__, '/Data/water_processes.json'), 'r') as f:
-            self.water_geos = json.load(f)
-        with open(pkg_resources.resource_filename(__name__, '/Data/heat_industrial_ng_processes.json'), 'r') as f:
+        with open(pkg_resources.resource_filename(__name__, '/Data/Regionalization/ei' + self.ecoinvent_version +
+                                                            '/heat_industrial_ng_processes.json'), 'r') as f:
             self.heat_district_ng = json.load(f)
-        with open(pkg_resources.resource_filename(__name__, '/Data/heat_industrial_non_ng_processes.json'), 'r') as f:
+        with open(pkg_resources.resource_filename(__name__, '/Data/Regionalization/ei' + self.ecoinvent_version +
+                                                            '/heat_industrial_non_ng_processes.json'), 'r') as f:
             self.heat_district_non_ng = json.load(f)
-        with open(pkg_resources.resource_filename(__name__, '/Data/heat_small_scale_non_ng_processes.json'), 'r') as f:
+        with open(pkg_resources.resource_filename(__name__, '/Data/Regionalization/ei' + self.ecoinvent_version +
+                                                            '/heat_small_scale_non_ng_processes.json'), 'r') as f:
             self.heat_small_scale_non_ng = json.load(f)
-        with open(pkg_resources.resource_filename(__name__, '/Data/COMTRADE_to_ecoinvent_geographies.json'), 'r') as f:
+        with open(pkg_resources.resource_filename(__name__, '/Data/Regionalization/ei' + self.ecoinvent_version +
+                                                            '/COMTRADE_to_ecoinvent_geographies.json'), 'r') as f:
             self.convert_ecoinvent_geos = json.load(f)
-        with open(pkg_resources.resource_filename(__name__, '/Data/COMTRADE_to_exiobase_geographies.json'), 'r') as f:
+        with open(pkg_resources.resource_filename(__name__, '/Data/Regionalization/ei' + self.ecoinvent_version +
+                                                            '/COMTRADE_to_exiobase_geographies.json'), 'r') as f:
             self.convert_exiobase_geos = json.load(f)
 
         # initialize attributes used within package
@@ -100,6 +111,9 @@ class Regioinvent:
         self.export_data = pd.DataFrame()
         self.import_data = pd.DataFrame()
         self.consumption_data = pd.DataFrame()
+        self.trade_conn = ''
+        self.regioinvent_database_name = ''
+        self.cutoff = 0
 
     def spatialize_my_ecoinvent(self):
         """
@@ -258,24 +272,22 @@ class Regioinvent:
                         into a Rest-of-theWorld aggregate.
         :return:
         """
-        # for now do it this way
-        self.regio_bio = True
 
         self.trade_conn = sqlite3.connect(trade_database_path)
         self.regioinvent_database_name = regioinvent_database_name
         self.cutoff = cutoff
 
-        # TODO check if it is still in memory after running self.spatialize_my_ecoinvent()
-        self.ei_wurst = wurst.extract_brightway2_databases(self.name_ei_with_regionalized_biosphere,
-                                                           add_identifiers=True)
-        # as a dictionary to speed things up later
-        self.ei_in_dict = {(i['reference product'], i['location'], i['name']): i for i in self.ei_wurst}
+        if not self.ei_wurst:
+            self.ei_wurst = wurst.extract_brightway2_databases(self.name_ei_with_regionalized_biosphere,
+                                                               add_identifiers=True)
+        if not self.ei_in_dict:
+            self.ei_in_dict = {(i['reference product'], i['location'], i['name']): i for i in self.ei_wurst}
 
         self.format_trade_data()
         self.first_order_regionalization()
         self.create_consumption_markets()
         self.second_order_regionalization()
-        self.regionalize_elem_flows()
+        self.spatialize_elem_flows()
         self.write_regioinvent_to_database()
         self.connect_ecoinvent_to_regioinvent()
 
@@ -834,9 +846,9 @@ class Regioinvent:
                                         i['input'] != duplicate] + [
                                            {'amount': total, 'type': 'technosphere', 'input': duplicate}]
 
-    def regionalize_elem_flows(self):
+    def spatialize_elem_flows(self):
         """
-        Function regionalizes the elementary flows of the regioinvent processes to the location of process.
+        Function spatializes the elementary flows of the regioinvent processes to the location of process.
         """
 
         if not self.regio_bio:
@@ -1785,11 +1797,3 @@ class Regioinvent:
                                 exc['name'] = replace_process['name']
                                 exc['product'] = replace_process['reference product']
                                 exc['input'] = (self.name_ei_with_regionalized_biosphere, exc['code'])
-
-
-def clean_up_dataframe(df):
-    # remove duplicates
-    df = df.drop_duplicates()
-    # fix index
-    df = df.reset_index().drop('index',axis=1)
-    return df
