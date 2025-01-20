@@ -60,7 +60,7 @@ To get started you can git clone this repository or simply download it.
 You will need a few things to get started:
 - Have an ecoinvent license (obviously)
 - Download the BACI database that was already extracted.
-You can download it from [here](https://doi.org/10.5281/zenodo.14616960)
+You can download it from [here](https://doi.org/10.5281/zenodo.11583814)
 - Install ```brightway2``` and have a brightway2 project with either ecoinvent3.9.1 cut-off or ecoinvent3.10 cut-off
 
 Note that regioinvent currently only supports the ecoinvent 3.9.1/3.10 cut-off version and operates solely on brightway2 (NOT 
