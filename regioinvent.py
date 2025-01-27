@@ -31,7 +31,7 @@ class Regioinvent:
         :param bw_project_name:         [str] the name of a brightway2 project containing an ecoinvent database.
         :param ecoinvent_database_name: [str] the name of the ecoinvent database within the brightway2 project.
         :param ecoinvent_version:       [str] the version of the ecoinvent database within the brightway2 project,
-                                            values can be "3.9.1" or "3.10".
+                                            values can be "3.9", "3.9.1", "3.10" or "3.10.1".
         """
 
         # set up logging tool
@@ -55,7 +55,13 @@ class Regioinvent:
         # set up necessary variables
         self.ecoinvent_database_name = ecoinvent_database_name
         self.name_ei_with_regionalized_biosphere = ecoinvent_database_name + ' regionalized'
-        self.ecoinvent_version = ecoinvent_version
+        if ecoinvent_version not in ["3.9", "3.9.1", "3.10" or "3.10.1"]:
+            raise KeyError("The version of ecoinvent you provided is not supported by Regioinvent."
+                           "Supported versions are: 3.9, 3.9.1, 3.10 or 3.10.1")
+        if ecoinvent_version in ["3.9", "3.9.1"]:
+            self.ecoinvent_version = '3.9'
+        elif ecoinvent_version in ["3.10", "3.10.1"]:
+            self.ecoinvent_version = '3.10'
         # name is fixed
         self.name_spatialized_biosphere = 'biosphere3_spatialized_flows'
         # parameter useful only for article
@@ -241,8 +247,8 @@ class Regioinvent:
             bw2.BW2Package.import_file(pkg_resources.resource_filename(
                 __name__,
                 '/Data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v310.0fffd5e3daa5f4cf11ef83e49c375827.bw2package'))
-        if lcia_method == 'all' and self.ecoinvent_version == '3.9.1':
-            self.logger.info("Importing all available fully regionalized lcia methods for ecoinvent3.9.1.")
+        if lcia_method == 'all' and self.ecoinvent_version == '3.9':
+            self.logger.info("Importing all available fully regionalized lcia methods for ecoinvent3.9.")
             bw2.BW2Package.import_file(pkg_resources.resource_filename(
                 __name__,
                 '/Data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v39.af770e84bfd0f4365d509c026796639a.bw2package'))
@@ -252,8 +258,8 @@ class Regioinvent:
             bw2.BW2Package.import_file(pkg_resources.resource_filename(
                 __name__,
                 '/Data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v310.0fffd5e3daa5f4cf11ef83e49c375827.bw2package'))
-        elif lcia_method == "IW v2.1" and self.ecoinvent_version == '3.9.1':
-            self.logger.info("Importing the fully regionalized version of IMPACT World+ v2.1 for ecoinvent3.9.1.")
+        elif lcia_method == "IW v2.1" and self.ecoinvent_version == '3.9':
+            self.logger.info("Importing the fully regionalized version of IMPACT World+ v2.1 for ecoinvent3.9.")
             bw2.BW2Package.import_file(pkg_resources.resource_filename(
                 __name__,
                 '/Data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v39.af770e84bfd0f4365d509c026796639a.bw2package'))
@@ -1153,7 +1159,7 @@ class Regioinvent:
                 if electricity_product_name == exc['product'] and 'cobalt' in exc['name']:
                     process['exchanges'].remove(exc)
 
-            # GLO is the only geography available for electricity, cobalt industry in ei3.9.1 and 3.10
+            # GLO is the only geography available for electricity, cobalt industry in ei3.9 and 3.10
             electricity_region = 'GLO'
             # store the name of the electricity process
             electricity_activity_name = 'market for ' + electricity_product_name
