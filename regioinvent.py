@@ -55,7 +55,7 @@ class Regioinvent:
         # set up necessary variables
         self.ecoinvent_database_name = ecoinvent_database_name
         self.name_ei_with_regionalized_biosphere = ecoinvent_database_name + ' regionalized'
-        if ecoinvent_version not in ["3.9", "3.9.1", "3.10" or "3.10.1"]:
+        if ecoinvent_version not in ["3.9", "3.9.1", "3.10", "3.10.1"]:
             raise KeyError("The version of ecoinvent you provided is not supported by Regioinvent."
                            "Supported versions are: 3.9, 3.9.1, 3.10 or 3.10.1")
         if ecoinvent_version in ["3.9", "3.9.1"]:
