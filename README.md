@@ -1,7 +1,7 @@
 # _Regiopremise_
 
-This repository adapts the original _Regioinvent_ tool to [_premise_](https://github.com/polca/premise) databases. 
-The main changes lie in the fact that _premise_ includes several additional locations and LCI datasets. 
+This repository adapts the original `Regioinvent` tool to [`premise`](https://github.com/polca/premise) databases. 
+The main changes lie in the fact that `premise` includes several additional locations and LCI datasets. 
 Additional locations correspond to Integrated Assessment Models (IAMs) regions. 
 
 ## _Regioinvent_
@@ -94,14 +94,15 @@ There are currently no support for other LCA software, as SimaPro and openLCA ar
 
 For the detailed methodology, take a look at the Methodology.md file.
 
-## Adaptations
-- ```Regiopremise``` (https://github.com/matthieu-str/Regiopremise) is an adaptation of regioinvent that can work with the 
-```premise``` library (https://github.com/polca/premise) and can operate with a regionalized EF3.1 version.
-
 ## Support
-Contact [maxime.agez@polymtl.ca](mailto:maxime.agez@polymtl.ca)
+Contact `Regioinvent` [maxime.agez@polymtl.ca](mailto:maxime.agez@polymtl.ca) <br>
+Contact `Regiopremise` [matthieu.souttre@polymtl.ca](mailto:matthieu.souttre@polymtl.ca)
 
 ## Citation
+`Regiopremise` <br>
+Citing the code (take the correct version): TBD <br>
+
+`Regioinvent` <br>
 Citing the code (take the correct version): https://doi.org/10.5281/zenodo.11836126 <br>
 Citing the article: _article currently in review_ <br>
 Citing BACI: Gaulier, G. and Zignago, S. (2010) BACI: International Trade Database at the Product-Level. The 1994-2007 Version. CEPII Working Paper, N°2010-23.
