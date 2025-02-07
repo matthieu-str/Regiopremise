@@ -954,13 +954,22 @@ class Regioinvent:
 
         # first we connect ecoinvent to consumption markets of regioinvent
         for process in bw2.Database(self.name_ei_with_regionalized_biosphere):
-            location = None
-            # for countries (e.g., CA)
-            if process.as_dict()['location'] in self.country_to_ecoinvent_regions.keys():
+
+            # check if the location is a premise-specific location
+            if process.as_dict()['location'] in self.premise_geo_mapping:
+                location = self.premise_geo_mapping[process.as_dict()['location']]
+            else:
                 location = process.as_dict()['location']
+
+            # for countries (e.g., CA)
+            if location in self.country_to_ecoinvent_regions.keys():
+                pass
             # for sub-countries (e.g., CA-QC)
-            elif process.as_dict()['location'].split('-')[0] in self.country_to_ecoinvent_regions.keys():
-                location = process.as_dict()['location'].split('-')[0]
+            elif location.split('-')[0] in self.country_to_ecoinvent_regions.keys():
+                location = location.split('-')[0]
+            else:
+                location = None
+
             # check if location is not None and not Switzerland
             if location and location != 'CH':
                 # loop through technosphere exchanges
