@@ -861,23 +861,6 @@ class Regioinvent:
                                                                      exc['product'], 'RoW')]['code'])
                         exc['input'] = (exc['database'], exc['code'])
 
-        # aggregating duplicate inputs (e.g., multiple consumption markets RoW callouts)
-        for process in self.regioinvent_in_wurst:
-            for exc in process['exchanges']:
-                try:
-                    exc['input']
-                except KeyError:
-                    exc['input'] = (exc['database'], exc['code'])
-
-            duplicates = [item for item, count in
-                          collections.Counter([i['input'] for i in process['exchanges']]).items() if count > 1]
-
-            for duplicate in duplicates:
-                total = sum([i['amount'] for i in process['exchanges'] if i['input'] == duplicate])
-                process['exchanges'] = [i for i in process['exchanges'] if
-                                        i['input'] != duplicate] + [
-                                           {'amount': total, 'type': 'technosphere', 'input': duplicate}]
-
     def spatialize_elem_flows(self):
         """
         Function spatializes the elementary flows of the regioinvent processes to the location of process.
