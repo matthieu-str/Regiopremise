@@ -26,9 +26,10 @@ from tqdm import tqdm
 
 
 class Regioinvent:
-    def __init__(self, bw_project_name, ecoinvent_database_name, ecoinvent_version):
+    def __init__(self, bw_project_name, premise_database_name, ecoinvent_database_name, ecoinvent_version):
         """
         :param bw_project_name:         [str] the name of a brightway2 project containing an ecoinvent database.
+        :param premise_database_name:   [str] the name of the premise database within the brightway2 project.
         :param ecoinvent_database_name: [str] the name of the ecoinvent database within the brightway2 project.
         :param ecoinvent_version:       [str] the version of the ecoinvent database within the brightway2 project,
                                             values can be "3.9", "3.9.1", "3.10" or "3.10.1".
@@ -49,12 +50,15 @@ class Regioinvent:
         if bw_project_name not in bw2.projects:
             raise KeyError("The brightway project name passed does not match with any existing brightway projects.")
         bw2.projects.set_current(bw_project_name)
+        if premise_database_name not in bw2.databases:
+            raise KeyError("The premise database name passed does not match with the existing databases within the brightway project.")
         if ecoinvent_database_name not in bw2.databases:
             raise KeyError("The ecoinvent database name passed does not match with the existing databases within the brightway project.")
 
         # set up necessary variables
+        self.premise_database_name = premise_database_name
         self.ecoinvent_database_name = ecoinvent_database_name
-        self.name_ei_with_regionalized_biosphere = ecoinvent_database_name + ' regionalized'
+        self.name_ei_with_regionalized_biosphere = premise_database_name + ' regionalized'
         if ecoinvent_version not in ["3.9", "3.9.1", "3.10" or "3.10.1"]:
             raise KeyError("The version of ecoinvent you provided is not supported by Regioinvent."
                            "Supported versions are: 3.9, 3.9.1, 3.10 or 3.10.1")
@@ -167,7 +171,7 @@ class Regioinvent:
         if self.name_ei_with_regionalized_biosphere not in bw2.databases:
             # transform format of ecoinvent to wurst format for speed-up
             self.logger.info("Extracting ecoinvent to wurst...")
-            self.ei_wurst = wurst.extract_brightway2_databases(self.ecoinvent_database_name, add_identifiers=True)
+            self.ei_wurst = wurst.extract_brightway2_databases(self.premise_database_name, add_identifiers=True)
 
             # also get ecoinvent in a format for more efficient searching
             self.ei_in_dict = {(i['reference product'], i['location'], i['name']): i for i in self.ei_wurst}
@@ -822,6 +826,7 @@ class Regioinvent:
                                             replace_process = self.ei_in_dict[(
                                                 exc['product'], process['location'], 'market for irrigation')]
                                     exc['code'] = replace_process['code']
+                                    exc['database'] = self.name_ei_with_regionalized_biosphere
                                     exc['name'] = replace_process['name']
                                     exc['product'] = replace_process['reference product']
                                     exc['input'] = (self.name_ei_with_regionalized_biosphere, exc['code'])
@@ -859,6 +864,7 @@ class Regioinvent:
                             # change code
                             exc['code'] = (consumption_markets_data[('consumption market for ' +
                                                                      exc['product'], 'RoW')]['code'])
+                            exc['location'] = 'RoW'
                         exc['input'] = (exc['database'], exc['code'])
 
     def spatialize_elem_flows(self):
@@ -1351,7 +1357,7 @@ class Regioinvent:
                     global_heat_process = ws.get_one(self.ei_wurst,
                                                      ws.equals("reference product", heat_flow),
                                                      ws.equals("location", 'GLO'),
-                                                     ws.equals("database", self.ecoinvent_database_name),
+                                                     ws.equals("database", self.premise_database_name),
                                                      ws.either(ws.contains("name", "market for"),
                                                                ws.contains("name", "market group for")))
 
