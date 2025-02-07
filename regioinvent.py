@@ -123,6 +123,23 @@ class Regioinvent:
         self.regioinvent_database_name = ''
         self.cutoff = 0
 
+    def fix_iam_location_codes(self):
+        """
+        Function to fix the location codes of the IAM region conflicting with ecoinvent.
+
+        :return: None (modifies the sql database)
+        """
+        premise_db = {(i['name'], i['reference product'], i['location']): i
+                      for i in bw2.Database(self.premise_database_name) if i['location'] == 'ME'}
+        ei_db = {(i['name'], i['reference product'], i['location']): i
+                 for i in bw2.Database(self.ecoinvent_database_name) if i['location'] == 'ME'}
+
+        for act_key in premise_db.keys():
+            if act_key not in ei_db.keys():
+                act = premise_db[act_key]
+                act.as_dict()['location'] = 'RME'
+                act.save()
+
     def spatialize_my_ecoinvent(self):
         """
         Function creates a copy of the original ecoinvent database and modifies this copy to spatialize the elementary
