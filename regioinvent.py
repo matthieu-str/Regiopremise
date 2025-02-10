@@ -25,7 +25,7 @@ import copy
 from tqdm import tqdm
 
 
-class Regioinvent:
+class Regiopremise:
     def __init__(self, bw_project_name, premise_database_name, ecoinvent_database_name, ecoinvent_version):
         """
         :param bw_project_name:         [str] the name of a brightway2 project containing an ecoinvent database.
@@ -144,10 +144,10 @@ class Regioinvent:
                 act.as_dict()['location'] = 'RME'
                 act.save()
 
-    def spatialize_my_ecoinvent(self):
+    def spatialize_my_premise(self):
         """
-        Function creates a copy of the original ecoinvent database and modifies this copy to spatialize the elementary
-        flows used by ecoinvent. It also creates additional technosphere water processes to remediate imbalances due to
+        Function creates a copy of the original premise database and modifies this copy to spatialize the elementary
+        flows used by premise. It also creates additional technosphere water processes to remediate imbalances due to
         technosphere misrepresentations.
 
         :return: nothing but creates multiple databases in your brightway2 project
@@ -170,7 +170,7 @@ class Regioinvent:
 
         if self.name_ei_with_regionalized_biosphere not in bw2.databases:
             # transform format of ecoinvent to wurst format for speed-up
-            self.logger.info("Extracting ecoinvent to wurst...")
+            self.logger.info("Extracting premise to wurst...")
             self.ei_wurst = wurst.extract_brightway2_databases(self.premise_database_name, add_identifiers=True)
 
             # also get ecoinvent in a format for more efficient searching
@@ -187,10 +187,10 @@ class Regioinvent:
                                  bw2.Database(self.name_spatialized_biosphere)}
 
             # fix some problems with water balance in ecoinvent processes (see description of function for more info)
-            self.logger.info("Fixing water processes in ecoinvent...")
+            self.logger.info("Fixing water processes in premise...")
             self.fix_ecoinvent_water()
 
-            self.logger.info("Spatializing ecoinvent...")
+            self.logger.info("Spatializing premise...")
             # loop through the whole ecoinvent database
             for process in self.ei_wurst:
                 # check if the location is a premise-specific location
@@ -255,15 +255,15 @@ class Regioinvent:
             # write the ecoinvent-regionalized database to brightway
             bw2.Database(self.name_ei_with_regionalized_biosphere).write(self.ei_regio_data)
         else:
-            self.logger.info("There is already a spatialized version of ecoinvent in your project. If you want to redo "
+            self.logger.info("There is already a spatialized version of premise in your project. If you want to redo "
                              "spatialization, please delete it and re-run.")
 
     def import_fully_regionalized_impact_method(self, lcia_method):
         """
         Function to import a fully regionalized impact method into your brightway project, to-be-used with the
-        spatialized version of ecoinvent. You can choose between IMPACT World+, EF and ReCiPe, or simply all of them.
+        spatialized version of premise. You can choose between IMPACT World+, EF and ReCiPe, or simply all of them.
 
-        :param lcia_method: [str] the name of the LCIA method to be imported to be used with the spatialized ecoinvent,
+        :param lcia_method: [str] the name of the LCIA method to be imported to be used with the spatialized premise,
                                 available methods are "IW v2.1", "EF v3.1", "ReCiPe2016 v1.1 (E)" or "all".
         :return:
         """
@@ -296,9 +296,9 @@ class Regioinvent:
         elif lcia_method == "ReCiPe2016 v1.1 (E)":
             self.logger.info("Importing the fully regionalized version of ReCiPe2016 v1.1 (E).")
 
-    def regionalize_ecoinvent_with_trade(self, trade_database_path, regioinvent_database_name, cutoff):
+    def regionalize_premise_with_trade(self, trade_database_path, regioinvent_database_name, cutoff):
         """
-        Function runs all the necessary sub-functions to incorporate trade data within ecoinvent supply chains
+        Function runs all the necessary sub-functions to incorporate trade data within premise supply chains
         descriptions
         :param trade_database_path: [str] the path to the trade database
         :param regioinvent_database_name: [str] the name to be given to the generated regioinvent database in brightway2
@@ -432,7 +432,7 @@ class Regioinvent:
         :return: self.regioinvent_in_wurst with new regionalized processes
         """
 
-        self.logger.info("Regionalizing main inputs of traded products of ecoinvent...")
+        self.logger.info("Regionalizing main inputs of traded products of premise...")
 
         for product in tqdm(self.eco_to_hs_class, leave=True):
             # filter commodity code from export_data
@@ -786,7 +786,7 @@ class Regioinvent:
     def second_order_regionalization(self):
         """
         Function that links newly created consumption markets to inputs of the different processes of the regionalized
-        ecoinvent database.
+        premise database.
         :return:  self.regioinvent_in_wurst with new regionalized processes
         """
 
