@@ -100,7 +100,7 @@ Contact `Regiopremise` [matthieu.souttre@polymtl.ca](mailto:matthieu.souttre@pol
 
 ## Citation
 `Regiopremise` <br>
-Citing the code (take the correct version): https://doi.org/10.5281/zenodo.14847260 <br>
+Citing the code (take the correct version): https://doi.org/10.5281/zenodo.14847259 <br>
 
 `Regioinvent` <br>
 Citing the code (take the correct version): https://doi.org/10.5281/zenodo.11836126 <br>
