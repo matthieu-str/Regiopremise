@@ -96,6 +96,6 @@ For the detailed methodology, take a look at the Methodology.md file.
 Contact [maxime.agez@polymtl.ca](mailto:maxime.agez@polymtl.ca)
 
 ## Citation
-Citing the code (take the correct version): https://doi.org/10.5281/zenodo.11836126 <br>
+Citing the code: https://doi.org/10.5281/zenodo.11836125 <br>
 Citing the article: _article currently in review_ <br>
 Citing BACI: Gaulier, G. and Zignago, S. (2010) BACI: International Trade Database at the Product-Level. The 1994-2007 Version. CEPII Working Paper, N°2010-23.

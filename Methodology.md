@@ -46,7 +46,7 @@ supply chains.
 
 A first approach, the most logical one, would be to scrap the Internet to "simply" gather this data which most probably
 exists but is not centralized in a database. The problem is that we are talking about getting national production data
-for more than 1,800 commodities in many countries, so probably more than 200,000 production data to find. This approach 
+for more than 1,900 commodities in many countries, so probably more than 200,000 production data to find. This approach 
 is therefore something regioinvent will strive towards slowly, but cannot be the first implemented approach as this 
 undertaking will take a long time.
 
@@ -70,7 +70,7 @@ we can then apply the share of each country to the global export market (provide
 represents 3% of the global export of apples, then we consider that Canada also represent 3% of the global production, 
 which leads to an estimate of 3,000 tonnes of apples produced in Canada, from which we subtract the export values 
 according to UN COMTRADE to derive a domestic consumption estimate. This approach requires finding global production 
-data for each of the 1,800+ commodities. However, it straight up considers that export and total production are
+data for each of the 1,900+ commodities. However, it straight up considers that export and total production are
 100% correlated, which is wrong.
 
 Both of these approaches have clear limits and issues and most likely do not provide satisfactory estimates, when compared
@@ -94,16 +94,17 @@ and GLO sets from ecoinvent. But here there is a compromise to be made. The regi
 commodities already expands the size of the database significantly. Further regionalization would start to require 
 fairly long calculation times (> 15 minutes) and fairly strong computation machines (most likely minimum 32GB RAM).
 
-In the end there are __1,848__ commodities regionalized for ecoinvent 3.9.1 cut-off and __1,860__ commodities regionalized for
+In the end there are __1,969__ commodities regionalized for ecoinvent 3.9.1 cut-off and __1,982__ commodities regionalized for
 ecoinvent 3.10 cut-off. You can find the list of these commodities in the Data/Regionalization/ei3.x/ecoinvent_to_HS.json
 files.
 
 ### Selection of countries for regionalization
-Ideally, the 1,800+ commodities could be regionalized for all countries in the world. Practically speaking though, there
+Ideally, the 1,900+ commodities could be regionalized for all countries in the world. Practically speaking though, there
 is clearly a constraint of calculation power. The more processes are created, the longer and harder the calculations will
-be. Therefore, regioinvent only regionalize for countries that are deemed relevant for each commodity. Why would I create
+be. Therefore, regioinvent only regionalizes for countries that are deemed relevant for each commodity. Why would I create
 a banana production process in Canada while Canada probably does not even produce bananas. How do we choose which countries
-are relevant? We look at the production and consumption data and cut-off any country lower than 1% of the cumulative sum.
+are relevant? We look at the production and consumption data and cut-off any country lower than X% of the cumulative sum,
+X being the cutoff selected by the user. By default this cutoff is set to 99%.
 So concretely, if we have such a distribution for production: China 75%, US 20%, Canada 4.5%, Peru 0.4%, Chile 0.1%, we 
 calculate the cumulative sum of the production: 
 1. China 75%
@@ -111,18 +112,33 @@ calculate the cumulative sum of the production:
 3. China + US + Canada 99.5%
 4. China + US + Canada + Peru 99.9% 
 5. China + US + Canada + Peru + Chile 100%
+
 As soon as the cumulative sum passes the cutoff threshold, any country remaining will be aggregated in a Rest-of-the-World 
-(RoW) region. So in the little example provided, processes for China, the US and Canada would be created, but processes
-for Peru and Chile would not be created. Instead, a RoW process would be created which is based on the production data of
-all aggregated countries (Peru and Chile in this example).
+(RoW) region. 
+
+So in the little example provided, if working with a 99% cutoff, processes for China, the US and Canada 
+would be created, but processes for Peru and Chile would not be created. Instead, a RoW process would be created which 
+is based on the production data of all aggregated countries (Peru and Chile in this example).
+
+If the cutoff was 90% instead, only process for China and the US would be created and Canada, Peru and Chile would be 
+aggregated as RoW.
+
+The higher the cutoff, the more countries are covered in the regionalization of each product, the more processes there are.
 
 The same principal is applied with consumption data. Production data is used for determining the producing countries 
 that will be represented, while consumption data is used to determine for which countries consumption markets will be
 created.
 
-The cut-off in regioinvent is one of the parameters the users can play around with. By default, it is put to 0.99. Which
-means the countries up to 99% of the cumulative sum of either production or consumption will be regionalized while others 
-will be aggregated in RoW.
+The effect of the cutoff selection o the results was estimated between the cutoff: 99%, 90% and 75%. You can see these
+effects applied to the IW+ v2.1 LCIA method. The numbers represent the median relative difference between all processes
+that are covered in all three versions of regioinvent (i.e., regioinvent with 99%, 90% and 75% cutoff). Overall, if we
+consider that the 99% cutoff provides the most accurate results, going from 99% to 90% triggers differences of about
+~1 to 2% on most of the impact categories, but reduces the size of regionvent from ~230,000 processes to ~85,000. 
+Going from 99% to 75% leads to differences of ~2 to 3%, but reduces the size to ~42,000 processes. Essentially, if you
+cannot work with the 99% cutoff, because it takes too long or you don't have enough RAM, working at lower cutoffs is not
+that impacting overall. Do note that on certain impact categories, i.e., freshwater acidification, freshwater 
+ecotoxocity, short term and water availability human health, the differences are between 6% and 50%. You can access the
+full comparison in the Excel file "Effect of cutoff" in the doc/ folder.
 
 ### Regionalizing - creating national production process
 Each combination of commodity/country previously selected is created within regioinvent. How do we go about that? Well
