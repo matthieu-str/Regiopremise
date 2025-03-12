@@ -247,11 +247,17 @@ class Regioinvent:
             bw2.BW2Package.import_file(pkg_resources.resource_filename(
                 __name__,
                 '/Data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v310.0fffd5e3daa5f4cf11ef83e49c375827.bw2package'))
+            bw2.BW2Package.import_file(pkg_resources.resource_filename(
+                __name__,
+                '/Data/EF/EF31_regionalized-for-ecoinvent-v310.107ba4a7333c947eda5a783113d3f34f.bw2package'))
         if lcia_method == 'all' and self.ecoinvent_version == '3.9':
             self.logger.info("Importing all available fully regionalized lcia methods for ecoinvent3.9.")
             bw2.BW2Package.import_file(pkg_resources.resource_filename(
                 __name__,
                 '/Data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v39.af770e84bfd0f4365d509c026796639a.bw2package'))
+            bw2.BW2Package.import_file(pkg_resources.resource_filename(
+                __name__,
+                '/Data/EF/EF31_regionalized-for-ecoinvent-v39.ff0965b0f9793fbd2a351c9155946122.bw2package'))
 
         if lcia_method == "IW v2.1" and self.ecoinvent_version == '3.10':
             self.logger.info("Importing the fully regionalized version of IMPACT World+ v2.1 for ecoinvent3.10.")
@@ -263,8 +269,18 @@ class Regioinvent:
             bw2.BW2Package.import_file(pkg_resources.resource_filename(
                 __name__,
                 '/Data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v39.af770e84bfd0f4365d509c026796639a.bw2package'))
-        elif lcia_method == "EF v3.1":
-            self.logger.info("Importing the fully regionalized version of EF v3.1.")
+
+        elif lcia_method == "EF v3.1" and self.ecoinvent_version == '3.10':
+            self.logger.info("Importing the fully regionalized version of EF v3.1 for ecoinvent 3.10.")
+            bw2.BW2Package.import_file(pkg_resources.resource_filename(
+                __name__,
+                '/Data/EF/EF31_regionalized-for-ecoinvent-v310.107ba4a7333c947eda5a783113d3f34f.bw2package'))
+        elif lcia_method == "EF v3.1" and self.ecoinvent_version == '3.9':
+            self.logger.info("Importing the fully regionalized version of EF v3.1 for ecoinvent 3.9.")
+            bw2.BW2Package.import_file(pkg_resources.resource_filename(
+                __name__,
+                '/Data/EF/EF31_regionalized-for-ecoinvent-v39.ff0965b0f9793fbd2a351c9155946122.bw2package'))
+
         elif lcia_method == "ReCiPe2016 v1.1 (E)":
             self.logger.info("Importing the fully regionalized version of ReCiPe2016 v1.1 (E).")
 
