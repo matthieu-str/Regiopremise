@@ -8,8 +8,8 @@ version of ecoinvent which almost does not rely on non-national processes such a
 
 Furthermore, since the resulting regionalized version of ecoinvent relies much less on broad regions, the regionalization
 of impacts can show its full potential. Therefore, ```Regioinvent``` also fully spatializes all relevant elementary flows
-and connects these spatialized elementary flows to regionalized life cycle impact assessment methods. Currently, only 
-the IMPACT World+ LCIA method is available. Later on, we plan on adding ReCiPe and EF as well.
+and connects these spatialized elementary flows to regionalized life cycle impact assessment methods. There are currently
+three LCIA regionalized methods implemented: IMPACT World+ v2.1 / EF 3.1 / ReCiPe 2016 v1.03 (H).
 
 ## Showcase
 To showcase what ```Regioinvent``` does, let's illustrate on an example: the production of diethanolamine in Sweden. 
@@ -61,9 +61,9 @@ You will need a few things to get started:
 - Have an ecoinvent license (obviously)
 - Download the BACI database that was already extracted.
 You can download it from [here](https://doi.org/10.5281/zenodo.11583814)
-- Install ```brightway2``` and have a brightway2 project with either ecoinvent3.9.1 cut-off or ecoinvent3.10 cut-off
+- Install ```brightway2``` and have a brightway2 project with either ecoinvent3.9.1 cut-off or ecoinvent3.10.1 cut-off
 
-Note that regioinvent currently only supports the ecoinvent 3.9.1/3.10 cut-off version and operates solely on brightway2 (NOT 
+Note that regioinvent currently only supports the ecoinvent 3.9.1/3.10.1 cut-off version and operates solely on brightway2 (NOT 
 brightway2.5).
 
 You can then follow the steps presented in the [demo.ipynb](https://github.com/CIRAIG/Regioinvent/tree/master/doc/demo.ipynb) 
@@ -90,7 +90,7 @@ For the detailed methodology, take a look at the Methodology.md file.
 
 ## Adaptations
 - ```Regiopremise``` (https://github.com/matthieu-str/Regiopremise) is an adaptation of regioinvent that can work with the 
-```premise``` library (https://github.com/polca/premise) and can operate with a regionalized EF3.1 version.
+```premise``` library (https://github.com/polca/premise).
 
 ## Support
 Contact [maxime.agez@polymtl.ca](mailto:maxime.agez@polymtl.ca)

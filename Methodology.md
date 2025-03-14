@@ -129,7 +129,7 @@ The same principal is applied with consumption data. Production data is used for
 that will be represented, while consumption data is used to determine for which countries consumption markets will be
 created.
 
-The effect of the cutoff selection o the results was estimated between the cutoff: 99%, 90% and 75%. You can see these
+The effect of the cutoff selection on the results was estimated between the cutoff: 99%, 90% and 75%. You can see these
 effects applied to the IW+ v2.1 LCIA method. The numbers represent the median relative difference between all processes
 that are covered in all three versions of regioinvent (i.e., regioinvent with 99%, 90% and 75% cutoff). Overall, if we
 consider that the 99% cutoff provides the most accurate results, going from 99% to 90% triggers differences of about
@@ -231,9 +231,8 @@ characterized and the results will mean nothing. You therefore cannot use regioi
 of brightway2. To be clear, there won't be any error and everything will work, but for impact categories with spatialized
 elementary flows, the results will be wrong.
 
-Regioinvent v1.2 operates only with IMPACT World+ as the programmers of regioinvent are also the maintainers of that 
-impact method. However, in the short-term future, ReCiPe and EF will also be made available with Regioinvent. Users are
-welcome to contribute by matching with other impact methods.
+Regioinvent v1.2.2 operates with IMPACT World+ v2.1,  ReCiPe 2016 v1.03 (H) and EF 3.1. Users are welcome to contribute by 
+matching with other impact methods.
 
 ### The water regionalization issue with ecoinvent
 The simple rule followed by regioinvent to spatialize elementary flows (i.e, just assigning the region of the process)
@@ -255,8 +254,8 @@ This step is basically a giant mapping effort to be done between the names of ec
 regionalization (e.g., "1-propanol") and UN COMTRADE commodity codes (e.g., 290512: "Alcohols; saturated monohydric, 
 propan-1-ol (propyl alcohol) and propan-2-ol (isopropyl alcohol)"). This mapping was first based on the existing mapping
 provided in the ecospold files as of the 3.10 of ecoinvent. However, the mapping of ecoinvent is lacking in many aspects.
-It was thus entirely redone "manually" with the help of ChatGPT4.0. While previous versions of chatGPT struggled with
-mapping correctly, chatGPT4.0 was capable of doing it reliably. Each mapping was checked again by the programmer.
+It was thus entirely redone "manually" with the help of ChatGPT-4o. While previous versions of chatGPT struggled with
+mapping correctly, chatGPT-4o was capable of doing it reliably. Each mapping was checked again by the programmer.
 
 This mapping can be found in the Data/Regionalization/ei3.x/ecoinvent_to_HS.json files.
 
@@ -268,7 +267,7 @@ a match between the countries in both databases. A mapping is therefore required
 This mapping can be consulted here: Data/Regionalization/ei3.x/COMTRADE_to_ecoinvent_geographies.json
 
 ### Connecting EXIOBASE sectors to UN COMTRADE commodities
-Another mapping step. Similarly to the one with ecoinvent, the mapping was conducted manually with the help of chatGPT4.0.
+Another mapping step. Similarly to the one with ecoinvent, the mapping was conducted manually with the help of chatGPT-4o.
 EXIOBASE is mainly based on the CPAv2.1 classification and is used in the domestic consumption estimation approach with 
 the national production/export ratios.
 
