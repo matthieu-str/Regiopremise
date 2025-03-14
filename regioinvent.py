@@ -240,8 +240,10 @@ class Regioinvent:
         :return:
         """
 
-        # just load the correct BW2Package file from Data storage folder
+        if lcia_method not in ["IW v2.1", "EF v3.1", "ReCiPe 2016 v1.03 (H)", "all"]:
+            raise KeyError("Available LCIA methods are: 'IW v2.1', 'EF v3.1', 'ReCiPe 2016 v1.03 (H)' or 'all'")
 
+        # just load the correct BW2Package file from Data storage folder
         if lcia_method == 'all' and self.ecoinvent_version == '3.10':
             self.logger.info("Importing all available fully regionalized lcia methods for ecoinvent3.10.")
             bw2.BW2Package.import_file(pkg_resources.resource_filename(
