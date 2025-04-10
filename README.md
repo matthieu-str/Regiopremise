@@ -72,7 +72,7 @@ You can download it from [here](https://doi.org/10.5281/zenodo.11583814)
 Note that regioinvent currently only supports the ecoinvent 3.9.1/3.10.1 cut-off version and operates solely on brightway2 (NOT 
 brightway2.5).
 
-You can then follow the steps presented in the [demo.ipynb](https://github.com/CIRAIG/Regioinvent/tree/master/doc/demo.ipynb) 
+You can then follow the steps presented in the [demo.ipynb](https://github.com/matthieu-str/Regiopremise/blob/master/doc/demo.ipynb) 
 Jupyter notebook.
 
 Required python version: 3.11
@@ -99,7 +99,7 @@ For the detailed methodology, take a look at the Methodology.md file.
 ```premise``` library (https://github.com/polca/premise) and can operate with a regionalized EF3.1 version.
 
 ## Support
-Contact [maxime.agez@polymtl.ca](mailto:maxime.agez@polymtl.ca)
+Contact [maxime.agez@polymtl.ca](mailto:maxime.agez@polymtl.ca) or [matthieu.souttre@polymtl.ca](mailto:matthieu.souttre@polymtl.ca)
 
 ## Citation
 `Regiopremise` <br>
