@@ -114,8 +114,9 @@ class Regioinvent:
         self.created_geographies = dict.fromkeys(self.eco_to_hs_class.keys())
         self.unit = dict.fromkeys(self.eco_to_hs_class.keys())
         self.trade_data = pd.DataFrame()
-        self.export_data = pd.DataFrame()
+        self.net_exports_data = pd.DataFrame()
         self.import_data = pd.DataFrame()
+        self.domestic_production = pd.DataFrame()
         self.consumption_data = pd.DataFrame()
         self.trade_conn = ''
         self.regioinvent_database_name = ''
@@ -380,8 +381,8 @@ class Regioinvent:
 
     def format_trade_data(self):
         """
-        Function extracts and formats the export data from the trade database
-        :return: self.export_data
+        Function extracts and formats the export/import and domestic production data from the trade database
+        :return: self.trade_data / self.import_data / self.net_exports_data / self.domestic_production / self.consumption_data
         """
 
         self.logger.info("Extracting and formatting trade data...")
@@ -389,35 +390,9 @@ class Regioinvent:
         # load BACI data from SQL database
         self.trade_data = pd.read_sql('SELECT * FROM [International trade data]', self.trade_conn)
 
-        # format export information
-        self.export_data = self.trade_data.set_index(['cmdCode', 'refYear', 'exporter']).drop(
+        # -------------------------------- Import/Exports -----------------------------------------
+        export_data = self.trade_data.set_index(['cmdCode', 'refYear', 'exporter']).drop(
             ['value (1,000 USD)', 'importer'], axis=1).groupby(['cmdCode', 'refYear', 'exporter']).sum().reset_index()
-
-        # estimate domestic production information
-        domestic_prod = pd.read_sql('SELECT * FROM "Domestic production"', con=self.trade_conn)
-        # domestic production is estimated from export so copy exports
-        self.domestic_data = self.export_data.copy('deep')
-        self.domestic_data.loc[:, 'COMTRADE_reporter'] = self.domestic_data.exporter.copy()
-        # go from ISO3 codes to country codes for respective databases
-        self.export_data.exporter = [self.convert_ecoinvent_geos[i] for i in self.export_data.exporter]
-        self.domestic_data.exporter = [self.convert_ecoinvent_geos[i] for i in self.domestic_data.exporter]
-        self.domestic_data.COMTRADE_reporter = [self.convert_exiobase_geos[i] for i in
-                                                self.domestic_data.COMTRADE_reporter]
-        # add HS codes
-        self.domestic_data = self.domestic_data.merge(
-            pd.DataFrame.from_dict(self.hs_class_to_exio, orient='index', columns=['cmdExio']).reset_index().rename(
-                columns={'index': 'cmdCode'}))
-        # merge with domestic production ratios
-        self.domestic_data = self.domestic_data.merge(domestic_prod, left_on=['COMTRADE_reporter', 'cmdExio'],
-                                                      right_on=['country', 'commodity'], how='left')
-        # apply the ratios to determine domestic production
-        self.domestic_data.loc[:, 'quantity (t)'] = (self.domestic_data.loc[:, 'quantity (t)'] /
-                                                     (1 - self.domestic_data.loc[:, 'domestic use (%)'] / 100) *
-                                                     self.domestic_data.loc[:, 'domestic use (%)'] / 100)
-        # add importer column equal to export column (i.e., domestic production)
-        self.domestic_data.loc[:, 'importer'] = self.domestic_data.exporter
-        # some infinites came up, replace them by zero
-        self.domestic_data.loc[:, 'quantity (t)'] = self.domestic_data.loc[:, 'quantity (t)'].replace(np.inf, 0.0)
 
         # format import information
         self.import_data = self.trade_data.set_index(['cmdCode', 'refYear', 'importer', 'exporter']).drop(
@@ -427,8 +402,81 @@ class Regioinvent:
         self.import_data.importer = [self.convert_ecoinvent_geos[i] for i in self.import_data.importer]
         self.import_data.exporter = [self.convert_ecoinvent_geos[i] for i in self.import_data.exporter]
 
-        # concatenate import and domestic data
-        self.consumption_data = pd.concat([self.import_data, self.domestic_data.loc[:, self.import_data.columns]])
+        # we get the total import data, not including the detail on the origin of the product
+        total_import_data = self.trade_data.set_index(['cmdCode', 'refYear', 'importer']).drop(
+            ['value (1,000 USD)', 'exporter'], axis=1).groupby(['cmdCode', 'refYear', 'importer']).sum().reset_index()
+        export_data = export_data.set_index(['cmdCode', 'refYear', 'exporter'])
+        total_import_data = total_import_data.set_index(['cmdCode', 'refYear', 'importer'])
+        total_import_data.index.names = ['cmdCode', 'refYear', 'exporter']
+        # instead of the exports, we rely on net exports to estimate some of the production volumes
+        self.net_exports_data = export_data - total_import_data
+        self.net_exports_data = self.net_exports_data[self.net_exports_data > 0].fillna(0)
+        self.net_exports_data = self.net_exports_data.reset_index()
+
+        # ----------------------------- Domestic production ---------------------------------------------------
+        # load real production volumes data
+        real_domestic_prod = pd.read_sql('SELECT * FROM "Real production data"', con=self.trade_conn)
+        # Puerto Rico (PRI) is considered under the US in UN COMTRADE
+        real_domestic_prod.loc[real_domestic_prod.producer == 'PRI', 'producer'] = 'USA'
+        real_domestic_prod = real_domestic_prod.groupby(
+            ['cmdCode', 'producer', 'source', 'refYear']).sum().reset_index()
+        # convert to ISO 2 letter codes
+        real_domestic_prod.producer = [self.convert_ecoinvent_geos[i] for i in real_domestic_prod.producer]
+        # identify the commodity codes for which we have actual production data
+        products_with_real_prod_data = set(real_domestic_prod.cmdCode)
+        # rename column producer to exporter
+        real_domestic_prod = real_domestic_prod.rename(columns={'producer': 'exporter'})
+
+        # load estimates from EXIOBASE
+        domestic_prod_ratios = pd.read_sql('SELECT * FROM "Domestic production estimates exiobase"', con=self.trade_conn)
+        # domestic production is estimated from net exports so copy them
+        estimated_domestic_prod = self.net_exports_data.copy('deep')
+        estimated_domestic_prod.loc[:, 'COMTRADE_reporter'] = estimated_domestic_prod.exporter.copy()
+        # go from ISO3 codes to country codes for respective databases
+        self.net_exports_data.exporter = [self.convert_ecoinvent_geos[i] for i in self.net_exports_data.exporter]
+        estimated_domestic_prod.exporter = [self.convert_ecoinvent_geos[i] for i in estimated_domestic_prod.exporter]
+        estimated_domestic_prod.COMTRADE_reporter = [self.convert_exiobase_geos[i] for i in
+                                                     estimated_domestic_prod.COMTRADE_reporter]
+        # add HS codes
+        estimated_domestic_prod = estimated_domestic_prod.merge(
+            pd.DataFrame.from_dict(self.hs_class_to_exio, orient='index', columns=['cmdExio']).reset_index().rename(
+                columns={'index': 'cmdCode'}))
+        # merge with domestic production ratios
+        estimated_domestic_prod = estimated_domestic_prod.merge(domestic_prod_ratios,
+                                                                left_on=['COMTRADE_reporter', 'cmdExio'],
+                                                                right_on=['country', 'commodity'], how='left')
+        # apply the ratios to determine domestic production
+        estimated_domestic_prod.loc[:, 'quantity (t)'] = (
+                estimated_domestic_prod.loc[:, 'quantity (t)'] /
+                (1 - estimated_domestic_prod.loc[:, 'domestic use (%)'] / 100) *
+                estimated_domestic_prod.loc[:, 'domestic use (%)'] / 100)
+        # add importer column equal to export column (i.e., domestic production)
+        estimated_domestic_prod.loc[:, 'importer'] = estimated_domestic_prod.exporter
+        # some infinites came up, replace them by zero
+        estimated_domestic_prod.loc[:, 'quantity (t)'] = estimated_domestic_prod.loc[:, 'quantity (t)'].replace(np.inf, 0.0)
+        # only keep non-null values
+        estimated_domestic_prod = estimated_domestic_prod.loc[estimated_domestic_prod.loc[:, 'quantity (t)'] != 0]
+        # only keep values for products with no real production data
+        estimated_domestic_prod = estimated_domestic_prod.loc[[i for i in estimated_domestic_prod.index if
+                                                               estimated_domestic_prod.loc[
+                                                                   i, 'cmdCode'] not in products_with_real_prod_data],
+                                                              self.import_data.columns]
+        # add source information
+        estimated_domestic_prod.loc[:, 'source'] = 'Rough estimate from EXIOBASE 3.9.5'
+
+        # so far real_domestic_prod was actually total production, need to remove exports from it
+        df1 = real_domestic_prod.set_index(['cmdCode', 'refYear', 'exporter']).drop('source', axis=1)
+        df2 = self.net_exports_data.loc[self.net_exports_data.cmdCode.isin(products_with_real_prod_data)].set_index(
+            ['cmdCode', 'refYear', 'exporter'])
+        # reindex otherwise NaNs and negative values would show up
+        real_domestic_prod.loc[:, 'quantity (t)'] = (df1 - df2.reindex(df1.index).fillna(0)).loc[:, 'quantity (t)'].values
+        # add an importer column with same value as exporter
+        real_domestic_prod.loc[:, 'importer'] = real_domestic_prod.exporter.copy()
+        # concatenate domestic production data
+        self.domestic_production = pd.concat([real_domestic_prod, estimated_domestic_prod])
+
+        # concatenate import and domestic data into consumption data
+        self.consumption_data = pd.concat([self.import_data, self.domestic_production.drop('source', axis=1)])
 
     def first_order_regionalization(self):
         """
