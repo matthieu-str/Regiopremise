@@ -429,6 +429,8 @@ class Regioinvent:
 
         # load estimates from EXIOBASE
         domestic_prod_ratios = pd.read_sql('SELECT * FROM "Domestic production estimates exiobase"', con=self.trade_conn)
+        # some entries are every slightly above the 100% (like 4e-16 above 100%...) which ruins everything. So we fix it.
+        domestic_prod_ratios.loc[domestic_prod_ratios.loc[:, 'domestic use (%)'] > 100] = 100.0
         # domestic production is estimated from net exports so copy them
         estimated_domestic_prod = self.net_exports_data.copy('deep')
         estimated_domestic_prod.loc[:, 'COMTRADE_reporter'] = estimated_domestic_prod.exporter.copy()
@@ -472,6 +474,8 @@ class Regioinvent:
         real_domestic_prod.loc[:, 'quantity (t)'] = (df1 - df2.reindex(df1.index).fillna(0)).loc[:, 'quantity (t)'].values
         # add an importer column with same value as exporter
         real_domestic_prod.loc[:, 'importer'] = real_domestic_prod.exporter.copy()
+        # negative values mean more export than total production -> impossible so set to zero
+        real_domestic_prod.loc[real_domestic_prod.loc[:,'quantity (t)'] < 0, 'quantity (t)'] = 0
         # concatenate domestic production data
         self.domestic_production = pd.concat([real_domestic_prod, estimated_domestic_prod])
 
