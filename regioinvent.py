@@ -113,11 +113,9 @@ class Regioinvent:
         self.transportation_modes = {}
         self.created_geographies = dict.fromkeys(self.eco_to_hs_class.keys())
         self.unit = dict.fromkeys(self.eco_to_hs_class.keys())
-        self.trade_data = pd.DataFrame()
-        self.net_exports_data = pd.DataFrame()
-        self.import_data = pd.DataFrame()
         self.domestic_production = pd.DataFrame()
         self.consumption_data = pd.DataFrame()
+        self.production_data = pd.DataFrame()
         self.trade_conn = ''
         self.regioinvent_database_name = ''
         self.cutoff = 0
@@ -316,6 +314,12 @@ class Regioinvent:
         self.regioinvent_database_name = regioinvent_database_name
         self.cutoff = cutoff
 
+        if cutoff > 0.99 or cutoff < 0:
+            raise KeyError('cutoff must be between 0 and 0.99')
+
+        if self.name_ei_with_regionalized_biosphere not in bw2.databases:
+            raise KeyError('You need to run the function spatialize_my_ecoinvent() first.')
+
         if not self.ei_wurst:
             self.ei_wurst = wurst.extract_brightway2_databases(self.name_ei_with_regionalized_biosphere,
                                                                add_identifiers=True)
@@ -382,105 +386,27 @@ class Regioinvent:
     def format_trade_data(self):
         """
         Function extracts and formats the export/import and domestic production data from the trade database
-        :return: self.trade_data / self.import_data / self.net_exports_data / self.domestic_production / self.consumption_data
+        :return: self.production_data / self.consumption_data
         """
 
         self.logger.info("Extracting and formatting trade data...")
 
-        # load BACI data from SQL database
-        self.trade_data = pd.read_sql('SELECT * FROM [International trade data]', self.trade_conn)
+        # load import data corrected for re-exports
+        import_data = pd.read_sql('SELECT * FROM [Import data]', self.trade_conn).drop('source', axis=1)
 
-        # -------------------------------- Import/Exports -----------------------------------------
-        export_data = self.trade_data.set_index(['cmdCode', 'refYear', 'exporter']).drop(
-            ['value (1,000 USD)', 'importer'], axis=1).groupby(['cmdCode', 'refYear', 'exporter']).sum().reset_index()
+        # load export data (that's actually net exports, as in exports - imports)
+        net_exports_data = pd.read_sql('SELECT * FROM [Export data]', self.trade_conn).drop('source', axis=1)
 
-        # format import information
-        self.import_data = self.trade_data.set_index(['cmdCode', 'refYear', 'importer', 'exporter']).drop(
-            ['value (1,000 USD)'], axis=1).groupby(['cmdCode', 'refYear', 'importer', 'exporter']).sum().reset_index()
-
-        # go from ISO3 codes to ISO2 codes
-        self.import_data.importer = [self.convert_ecoinvent_geos[i] for i in self.import_data.importer]
-        self.import_data.exporter = [self.convert_ecoinvent_geos[i] for i in self.import_data.exporter]
-
-        # we get the total import data, not including the detail on the origin of the product
-        total_import_data = self.trade_data.set_index(['cmdCode', 'refYear', 'importer']).drop(
-            ['value (1,000 USD)', 'exporter'], axis=1).groupby(['cmdCode', 'refYear', 'importer']).sum().reset_index()
-        export_data = export_data.set_index(['cmdCode', 'refYear', 'exporter'])
-        total_import_data = total_import_data.set_index(['cmdCode', 'refYear', 'importer'])
-        total_import_data.index.names = ['cmdCode', 'refYear', 'exporter']
-        # instead of the exports, we rely on net exports to estimate some of the production volumes
-        self.net_exports_data = export_data - total_import_data
-        self.net_exports_data = self.net_exports_data[self.net_exports_data > 0].fillna(0)
-        self.net_exports_data = self.net_exports_data.reset_index()
-
-        # ----------------------------- Domestic production ---------------------------------------------------
-        # load real production volumes data
-        real_domestic_prod = pd.read_sql('SELECT * FROM "Real production data"', con=self.trade_conn)
-        # Puerto Rico (PRI) is considered under the US in UN COMTRADE
-        real_domestic_prod.loc[real_domestic_prod.producer == 'PRI', 'producer'] = 'USA'
-        real_domestic_prod = real_domestic_prod.groupby(
-            ['cmdCode', 'producer', 'source', 'refYear']).sum().reset_index()
-        # convert to ISO 2 letter codes
-        real_domestic_prod.producer = [self.convert_ecoinvent_geos[i] for i in real_domestic_prod.producer]
-        # identify the commodity codes for which we have actual production data
-        products_with_real_prod_data = set(real_domestic_prod.cmdCode)
-        # rename column producer to exporter
-        real_domestic_prod = real_domestic_prod.rename(columns={'producer': 'exporter'})
-
-        # load estimates from EXIOBASE
-        domestic_prod_ratios = pd.read_sql('SELECT * FROM "Domestic production estimates exiobase"', con=self.trade_conn)
-        # some entries are every slightly above the 100% (like 4e-16 above 100%...) which ruins everything. So we fix it.
-        domestic_prod_ratios.loc[domestic_prod_ratios.loc[:, 'domestic use (%)'] > 100] = 100.0
-        # domestic production is estimated from net exports so copy them
-        estimated_domestic_prod = self.net_exports_data.copy('deep')
-        estimated_domestic_prod.loc[:, 'COMTRADE_reporter'] = estimated_domestic_prod.exporter.copy()
-        # go from ISO3 codes to country codes for respective databases
-        self.net_exports_data.exporter = [self.convert_ecoinvent_geos[i] for i in self.net_exports_data.exporter]
-        estimated_domestic_prod.exporter = [self.convert_ecoinvent_geos[i] for i in estimated_domestic_prod.exporter]
-        estimated_domestic_prod.COMTRADE_reporter = [self.convert_exiobase_geos[i] for i in
-                                                     estimated_domestic_prod.COMTRADE_reporter]
-        # add HS codes
-        estimated_domestic_prod = estimated_domestic_prod.merge(
-            pd.DataFrame.from_dict(self.hs_class_to_exio, orient='index', columns=['cmdExio']).reset_index().rename(
-                columns={'index': 'cmdCode'}))
-        # merge with domestic production ratios
-        estimated_domestic_prod = estimated_domestic_prod.merge(domestic_prod_ratios,
-                                                                left_on=['COMTRADE_reporter', 'cmdExio'],
-                                                                right_on=['country', 'commodity'], how='left')
-        # apply the ratios to determine domestic production
-        estimated_domestic_prod.loc[:, 'quantity (t)'] = (
-                estimated_domestic_prod.loc[:, 'quantity (t)'] /
-                (1 - estimated_domestic_prod.loc[:, 'domestic use (%)'] / 100) *
-                estimated_domestic_prod.loc[:, 'domestic use (%)'] / 100)
-        # add importer column equal to export column (i.e., domestic production)
-        estimated_domestic_prod.loc[:, 'importer'] = estimated_domestic_prod.exporter
-        # some infinites came up, replace them by zero
-        estimated_domestic_prod.loc[:, 'quantity (t)'] = estimated_domestic_prod.loc[:, 'quantity (t)'].replace(np.inf, 0.0)
-        # only keep non-null values
-        estimated_domestic_prod = estimated_domestic_prod.loc[estimated_domestic_prod.loc[:, 'quantity (t)'] != 0]
-        # only keep values for products with no real production data
-        estimated_domestic_prod = estimated_domestic_prod.loc[[i for i in estimated_domestic_prod.index if
-                                                               estimated_domestic_prod.loc[
-                                                                   i, 'cmdCode'] not in products_with_real_prod_data],
-                                                              self.import_data.columns]
-        # add source information
-        estimated_domestic_prod.loc[:, 'source'] = 'Rough estimate from EXIOBASE 3.9.5'
-
-        # so far real_domestic_prod was actually total production, need to remove exports from it
-        df1 = real_domestic_prod.set_index(['cmdCode', 'refYear', 'exporter']).drop('source', axis=1)
-        df2 = self.net_exports_data.loc[self.net_exports_data.cmdCode.isin(products_with_real_prod_data)].set_index(
-            ['cmdCode', 'refYear', 'exporter'])
-        # reindex otherwise NaNs and negative values would show up
-        real_domestic_prod.loc[:, 'quantity (t)'] = (df1 - df2.reindex(df1.index).fillna(0)).loc[:, 'quantity (t)'].values
-        # add an importer column with same value as exporter
-        real_domestic_prod.loc[:, 'importer'] = real_domestic_prod.exporter.copy()
-        # negative values mean more export than total production -> impossible so set to zero
-        real_domestic_prod.loc[real_domestic_prod.loc[:,'quantity (t)'] < 0, 'quantity (t)'] = 0
-        # concatenate domestic production data
-        self.domestic_production = pd.concat([real_domestic_prod, estimated_domestic_prod])
+        # load domestic production
+        self.domestic_production = pd.read_sql('SELECT * FROM [Domestic production data]', self.trade_conn)
 
         # concatenate import and domestic data into consumption data
-        self.consumption_data = pd.concat([self.import_data, self.domestic_production.drop('source', axis=1)])
+        self.consumption_data = pd.concat([import_data, self.domestic_production.drop('source', axis=1)])
+
+        # concatenate net exports and domestic data into production data
+        self.production_data = pd.concat([net_exports_data,
+                                          self.domestic_production.drop(['source', 'importer'], axis=1)])
+        self.production_data = self.production_data.groupby(['cmdCode', 'refYear', 'exporter']).sum().reset_index()
 
     def first_order_regionalization(self):
         """
@@ -491,24 +417,24 @@ class Regioinvent:
         self.logger.info("Regionalizing main inputs of traded products of ecoinvent...")
 
         for product in tqdm(self.eco_to_hs_class, leave=True):
-            # filter commodity code from export_data
-            cmd_export_data = self.export_data[self.export_data.cmdCode.isin([self.eco_to_hs_class[product]])].copy(
+            # filter commodity code from production_data
+            cmd_prod_data = self.production_data[self.production_data.cmdCode.isin([self.eco_to_hs_class[product]])].copy(
                 'deep')
-            # calculate the average export volume over the available years for each country
-            cmd_export_data = cmd_export_data.groupby('exporter').agg({'quantity (t)': 'mean'})
-            exporters = (cmd_export_data.loc[:, 'quantity (t)'] / cmd_export_data.loc[:,
+            # calculate the average production volume over the available years for each country
+            cmd_prod_data = cmd_prod_data.groupby('exporter').agg({'quantity (t)': 'mean'})
+            producers = (cmd_prod_data.loc[:, 'quantity (t)'] / cmd_prod_data.loc[:,
                                                                   'quantity (t)'].sum()).sort_values(ascending=False)
-            # only keep the countries representing XX% of global exports of the product and create a RoW from that
-            limit = exporters.index.get_loc(exporters[exporters.cumsum() > self.cutoff].index[0]) + 1
-            remainder = exporters.iloc[limit:].sum()
-            exporters = exporters.iloc[:limit]
-            if 'RoW' in exporters.index:
-                exporters.loc['RoW'] += remainder
+            # only keep the countries representing XX% of global production of the product and create a RoW from that
+            limit = producers.index.get_loc(producers[producers.cumsum() > self.cutoff].index[0]) + 1
+            remainder = producers.iloc[limit:].sum()
+            producers = producers.iloc[:limit]
+            if 'RoW' in producers.index:
+                producers.loc['RoW'] += remainder
             else:
-                exporters.loc['RoW'] = remainder
+                producers.loc['RoW'] = remainder
 
             # register the information about created geographies for each product
-            self.created_geographies[product] = [i for i in exporters.index]
+            self.created_geographies[product] = [i for i in producers.index]
 
             # identify the processes producing the product
             filter_processes = ws.get_many(self.ei_wurst, ws.equals("reference product", product),
@@ -556,14 +482,20 @@ class Regioinvent:
                 self.transportation_modes[product] = {k: v / number_of_markets for k, v in
                                                       self.transportation_modes[product].items()}
 
-            # create the global export market process within regioinvent
+            # create the global production market process within regioinvent
             global_market_activity = copy.deepcopy(dataset)
 
             # rename activity
-            global_market_activity['name'] = f"""export market for {product}"""
+            global_market_activity['name'] = f"""production market for {product}"""
 
             # add a comment
-            global_market_activity['comment'] = f"""This process represents the global export market for {product}. It can be used as a proxy for global production market but is not a global production market as it does not include domestic production data. The shares come from export data from the BACI database for the commodity {self.eco_to_hs_class[product]}. Data from BACI is already in physical units. An average of the 5 last years of export trade available data is taken (in general from 2018 to 2022). Countries are taken until {self.cutoff*100}% of the global production amounts are covered. The rest of the data is aggregated in a RoW (Rest-of-the-World) region."""
+            try:
+                source = self.domestic_production.loc[
+                    self.domestic_production.cmdCode == self.eco_to_hs_class[product], 'source'].iloc[0].split(' - ')[0]
+            # if IndexError -> product is only consumed domestically and not exported according to exiobase
+            except IndexError:
+                source = 'EXIOBASE'
+            global_market_activity['comment'] = f"""This process represents the global production market for {product}. The shares come from export data from the BACI database for the commodity {self.eco_to_hs_class[product]}. Data from BACI is already in physical units. An average of the 5 last years of export trade available data is taken (in general from 2018 to 2022). Domestic production was extracted/estimated from {source}. Countries are taken until {self.cutoff*100}% of the global production amounts are covered. The rest of the data is aggregated in a RoW (Rest-of-the-World) region."""
 
             # location will be global (it's a global market)
             global_market_activity['location'] = 'GLO'
@@ -590,13 +522,13 @@ class Regioinvent:
             # store unit of the product, need it later on
             self.unit[product] = global_market_activity['unit']
 
-            def copy_process(product, activity, region, export_country):
+            def copy_process(product, activity, region, prod_country):
                 """
                 Fonction that copies a process from ecoinvent
                 :param product: [str] name of the reference product
                 :param activity: [str] name of the activity
                 :param region: [str] name of the location of the original ecoinvent process
-                :param export_country: [str] name of the location of the created regioinvent process
+                :param prod_country: [str] name of the location of the created regioinvent process
                 :return: a copied and modified process of ecoinvent
                 """
                 # filter the process to-be-copied
@@ -611,26 +543,26 @@ class Regioinvent:
                                      ws.exclude(ws.contains("name", "import from")))
                 regio_process = copy.deepcopy(process)
                 # change location
-                regio_process['location'] = export_country
+                regio_process['location'] = prod_country
                 # change code
                 regio_process['code'] = uuid.uuid4().hex
                 # change database
                 regio_process['database'] = self.regioinvent_database_name
                 # add comment
-                regio_process['comment'] = f'This process is a regionalized adaptation of the following process of the ecoinvent database: {activity} | {product} | {region}. No amount values were modified in the regionalization process, only the origin of the flows.'
+                regio_process['comment'] = f"""This process is a regionalized adaptation of the following process of the ecoinvent database: {activity} | {product} | {region}. No amount values were modified in the regionalization process, only the origin of the flows."""
                 # update production exchange
                 [i for i in regio_process['exchanges'] if i['type'] == 'production'][0]['code'] = regio_process['code']
                 [i for i in regio_process['exchanges'] if i['type'] == 'production'][0]['database'] = regio_process['database']
                 [i for i in regio_process['exchanges'] if i['type'] == 'production'][0]['location'] = regio_process['location']
                 [i for i in regio_process['exchanges'] if i['type'] == 'production'][0]['input'] = (regio_process['database'], regio_process['code'])
-                # put the regionalized process' share into the global export market
+                # put the regionalized process' share into the global production market
                 global_market_activity['exchanges'].append(
-                    {"amount": exporters.loc[export_country] * self.distribution_technologies[product][activity],
+                    {"amount": producers.loc[prod_country] * self.distribution_technologies[product][activity],
                      "type": "technosphere",
                      "name": regio_process['name'],
                      "product": regio_process['reference product'],
                      "unit": regio_process['unit'],
-                     "location": export_country,
+                     "location": prod_country,
                      "database": self.regioinvent_database_name,
                      "code": global_market_activity['code'],
                      "input": (regio_process['database'], regio_process['code']),
@@ -638,66 +570,66 @@ class Regioinvent:
                                 global_market_activity['code'])})
                 return regio_process
 
-            # loop through technologies and exporters
+            # loop through technologies and producers
             for technology in possibilities.keys():
-                for exporter in exporters.index:
+                for producer in producers.index:
                     # reset regio_process variable
                     regio_process = None
-                    # if the exporting country is available in the geographies of the ecoinvent production technologies
-                    if exporter in possibilities[technology] and exporter not in ['RoW']:
-                        regio_process = copy_process(product, technology, exporter, exporter)
-                    # if a region associated with exporting country is available in the geographies of the ecoinvent production technologies
-                    elif exporter in self.country_to_ecoinvent_regions:
-                        for potential_region in self.country_to_ecoinvent_regions[exporter]:
+                    # if the producing country is available in the geographies of the ecoinvent production technologies
+                    if producer in possibilities[technology] and producer not in ['RoW']:
+                        regio_process = copy_process(product, technology, producer, producer)
+                    # if a region associated with producing country is available in the geographies of the ecoinvent production technologies
+                    elif producer in self.country_to_ecoinvent_regions:
+                        for potential_region in self.country_to_ecoinvent_regions[producer]:
                             if potential_region in possibilities[technology]:
-                                regio_process = copy_process(product, technology, potential_region, exporter)
+                                regio_process = copy_process(product, technology, potential_region, producer)
                     # otherwise, take either RoW, GLO or a random available geography
                     if not regio_process:
                         if 'RoW' in possibilities[technology]:
-                            regio_process = copy_process(product, technology, 'RoW', exporter)
+                            regio_process = copy_process(product, technology, 'RoW', producer)
                         elif 'GLO' in possibilities[technology]:
-                            regio_process = copy_process(product, technology, 'GLO', exporter)
+                            regio_process = copy_process(product, technology, 'GLO', producer)
                         else:
                             if possibilities[technology]:
                                 # if no RoW/GLO processes available, take the first available geography by default...
                                 regio_process = copy_process(product, technology, possibilities[technology][0],
-                                                             exporter)
-                                self.assigned_random_geography.append([product, technology, exporter])
+                                                             producer)
+                                self.assigned_random_geography.append([product, technology, producer])
 
                     # for each input, we test the presence of said inputs and regionalize that input
                     # testing the presence allows to save time if the input in question is just not used by the process
                     if regio_process:
                         # aluminium specific electricity input
                         if self.test_input_presence(regio_process, 'electricity', extra='aluminium/electricity'):
-                            regio_process = self.change_aluminium_electricity(regio_process, exporter)
+                            regio_process = self.change_aluminium_electricity(regio_process, producer)
                         # cobalt specific electricity input
                         elif self.test_input_presence(regio_process, 'electricity', extra='cobalt/electricity'):
                             regio_process = self.change_cobalt_electricity(regio_process)
                         # normal electricity input
                         elif self.test_input_presence(regio_process, 'electricity', extra='voltage'):
-                            regio_process = self.change_electricity(regio_process, exporter)
+                            regio_process = self.change_electricity(regio_process, producer)
                         # municipal solid waste input
                         if self.test_input_presence(regio_process, 'municipal solid waste'):
-                            regio_process = self.change_waste(regio_process, exporter)
+                            regio_process = self.change_waste(regio_process, producer)
                         # heat, district or industrial, natural gas input
                         if self.test_input_presence(regio_process, 'heat, district or industrial, natural gas'):
-                            regio_process = self.change_heat(regio_process, exporter,
+                            regio_process = self.change_heat(regio_process, producer,
                                                              'heat, district or industrial, natural gas')
                         # heat, district or industrial, other than natural gas input
                         if self.test_input_presence(regio_process,
                                                     'heat, district or industrial, other than natural gas'):
-                            regio_process = self.change_heat(regio_process, exporter,
+                            regio_process = self.change_heat(regio_process, producer,
                                                              'heat, district or industrial, other than natural gas')
                         # heat, central or small-scale, other than natural gas input
                         if self.test_input_presence(regio_process,
                                                     'heat, central or small-scale, other than natural gas'):
-                            regio_process = self.change_heat(regio_process, exporter,
+                            regio_process = self.change_heat(regio_process, producer,
                                                              'heat, central or small-scale, other than natural gas')
-                    # register the regionalized process within the database
+                    # register the regionalized process within the wurst database
                     if regio_process:
                         self.regioinvent_in_wurst.append(regio_process)
 
-            # add transportation to export market
+            # add transportation to production market
             for transportation_mode in self.transportation_modes[product]:
                 global_market_activity['exchanges'].append({
                     'amount': self.transportation_modes[product][transportation_mode],
@@ -708,7 +640,7 @@ class Regioinvent:
                         transportation_mode).as_dict()['reference product'],
                     'input': (self.name_ei_with_regionalized_biosphere, transportation_mode)
                 })
-            # and register the export market in wurst
+            # and register the production market in the wurst database
             self.regioinvent_in_wurst.append(global_market_activity)
 
     def create_consumption_markets(self):
@@ -727,49 +659,54 @@ class Regioinvent:
             self.regioinvent_in_dict[(process['reference product'], process['location'])].append(
                 {process['name']: process})
 
-        # extracting link between ecoinvent and exiobase regions for documentation in created process description
-        eco_to_exio_region = dict(zip(self.domestic_data.exporter, self.domestic_data.COMTRADE_reporter))
-
         for product in tqdm(self.eco_to_hs_class, leave=True):
             # filter the product in self.consumption_data
             cmd_consumption_data = self.consumption_data[
                 self.consumption_data.cmdCode == self.eco_to_hs_class[product]].copy('deep')
-            # calculate the average import volume for each country
+            # calculate the average consumption volume for each country
             cmd_consumption_data = cmd_consumption_data.groupby(['importer', 'exporter']).agg({'quantity (t)': 'mean'})
             # change to relative values
-            importers = (cmd_consumption_data.groupby(level=0).sum() /
+            consumers = (cmd_consumption_data.groupby(level=0).sum() /
                          cmd_consumption_data.sum().sum()).sort_values(by='quantity (t)', ascending=False)
-            # only keep importers till the user-defined cut-off of total imports
-            limit = importers.index.get_loc(importers[importers.cumsum() > self.cutoff].dropna().index[0]) + 1
+            # only keep consumers till the user-defined cut-off of total consumption
+            limit = consumers.index.get_loc(consumers[consumers.cumsum() > self.cutoff].dropna().index[0]) + 1
             # aggregate the rest
-            remainder = cmd_consumption_data.loc[importers.index[limit:]].groupby(level=1).sum()
-            cmd_consumption_data = cmd_consumption_data.loc[importers.index[:limit]]
+            remainder = cmd_consumption_data.loc[consumers.index[limit:]].groupby(level=1).sum()
+            cmd_consumption_data = cmd_consumption_data.loc[consumers.index[:limit]]
             # assign the aggregate to RoW location
             cmd_consumption_data = pd.concat([cmd_consumption_data, pd.concat([remainder], keys=['RoW'])])
             cmd_consumption_data.index = pd.MultiIndex.from_tuples([i for i in cmd_consumption_data.index])
             cmd_consumption_data = cmd_consumption_data.sort_index()
 
-            # loop through each selected importers of the commodity
-            for importer in cmd_consumption_data.index.levels[0]:
+            # loop through each selected consumers of the commodity
+            for consumer in cmd_consumption_data.index.levels[0]:
                 # change to relative values
-                cmd_consumption_data.loc[importer, 'quantity (t)'] = (
-                        cmd_consumption_data.loc[importer, 'quantity (t)'] /
-                        cmd_consumption_data.loc[importer, 'quantity (t)'].sum()).values
+                cmd_consumption_data.loc[consumer, 'quantity (t)'] = (
+                        cmd_consumption_data.loc[consumer, 'quantity (t)'] /
+                        cmd_consumption_data.loc[consumer, 'quantity (t)'].sum()).values
                 # we need to add the aggregate to potentially already existing RoW exchanges
                 cmd_consumption_data = pd.concat([
                     cmd_consumption_data.drop('RoW', level=0),
                     pd.concat([cmd_consumption_data.loc['RoW'].groupby(level=0).sum()], keys=['RoW'])])
                 cmd_consumption_data = cmd_consumption_data.fillna(0)
 
+                try:
+                    source = self.domestic_production.loc[
+                        self.domestic_production.cmdCode == self.eco_to_hs_class[product], 'source'].iloc[0].split(
+                        ' - ')[0]
+                # if IndexError -> product is only consumed domestically and not exported according to exiobase
+                except IndexError:
+                    source = 'EXIOBASE'
+
                 # create the process information
                 new_import_data = {
                     'name': 'consumption market for ' + product,
                     'reference product': product,
-                    'location': importer,
+                    'location': consumer,
                     'type': 'process',
                     'unit': self.unit[product],
                     'code': uuid.uuid4().hex,
-                    'comment': f'This process represents the consumption market of {product} in {importer}. The shares were determined based on two aspects. The imports of the commodity {self.eco_to_hs_class[product]} taken from the BACI database (average over the years 2018, 2019, 2020, 2021, 2022) as well as the domestic production estimate for the sector {self.hs_class_to_exio[self.eco_to_hs_class[product]]} in the region {eco_to_exio_region[importer]} taken from the EXIOBASE database. Shares are considered until {self.cutoff*100}% of the imports+domestic consumption are covered. Residual imports are aggregated in a RoW (Rest-of-the-World) region.',
+                    'comment': f"""This process represents the consumption market of {product} in {consumer}. The shares were determined based on two aspects. The imports of the commodity {self.eco_to_hs_class[product]} taken from the BACI database (average over the years 2018, 2019, 2020, 2021, 2022). The domestic consumption data was extracted/estimated from {source}.""",
                     'database': self.regioinvent_database_name,
                     'exchanges': []
                 }
@@ -781,9 +718,9 @@ class Regioinvent:
                                                                new_import_data['code'])})
                 # identify regionalized processes that were created in self.first_order_regionalization()
                 available_trading_partners = self.created_geographies[product]
-                # loop through the selected importers
-                for trading_partner in cmd_consumption_data.loc[importer].index:
-                    # check if a regionalized process exist for that importer
+                # loop through the selected consumers
+                for trading_partner in cmd_consumption_data.loc[consumer].index:
+                    # check if a regionalized process exist for that consumer
                     if trading_partner in available_trading_partners:
                         # loop through available technologies to produce the commodity
                         for technology in self.distribution_technologies[product]:
@@ -794,12 +731,12 @@ class Regioinvent:
                             share = self.distribution_technologies[product][technology]
                             # create the exchange
                             new_import_data['exchanges'].append({
-                                'amount': cmd_consumption_data.loc[(importer, trading_partner), 'quantity (t)'] * share,
+                                'amount': cmd_consumption_data.loc[(consumer, trading_partner), 'quantity (t)'] * share,
                                 'type': 'technosphere',
                                 'input': (self.regioinvent_database_name, code),
                                 'name': product
                             })
-                    # if a regionalized process does not exist for importer, take the RoW aggregate
+                    # if a regionalized process does not exist for consumer, take the RoW aggregate
                     else:
                         # loop through available technologies to produce the commodity
                         for technology in self.distribution_technologies[product]:
@@ -810,7 +747,7 @@ class Regioinvent:
                             share = self.distribution_technologies[product][technology]
                             # create the exchange
                             new_import_data['exchanges'].append({
-                                'amount': cmd_consumption_data.loc[(importer, trading_partner), 'quantity (t)'] * share,
+                                'amount': cmd_consumption_data.loc[(consumer, trading_partner), 'quantity (t)'] * share,
                                 'type': 'technosphere',
                                 'input': (self.regioinvent_database_name, code),
                                 'name': product
@@ -854,7 +791,7 @@ class Regioinvent:
             # loop through all created processes
             for process in self.regioinvent_in_wurst:
                 # only for production processes (not for markets)
-                if 'consumption market' not in process['name'] and 'export market' not in process['name']:
+                if 'consumption market' not in process['name'] and 'production market' not in process['name']:
                     # loop through exchanges
                     for exc in process['exchanges']:
                         # if it's a technosphere exchange
@@ -891,7 +828,7 @@ class Regioinvent:
         # loop through created processes
         for process in self.regioinvent_in_wurst:
             # only for production processes (not for markets)
-            if 'consumption market' not in process['name'] and 'export market' not in process['name']:
+            if 'consumption market' not in process['name'] and 'production market' not in process['name']:
                 # loop through exchanges
                 for exc in process['exchanges']:
                     # if the exchange is about one of the products that have been regionalized
