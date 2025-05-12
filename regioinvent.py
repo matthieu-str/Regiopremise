@@ -10,7 +10,6 @@ date created: 06-04-24
 """
 
 import pandas as pd
-import numpy as np
 import json
 import pkg_resources
 import brightway2 as bw2
@@ -649,171 +648,216 @@ class Regioinvent:
             self.regioinvent_in_wurst.append(global_market_activity)
 
         # -----------------------------------------------------------------------------------------------------------
-        # in a second time, we regionalize all other products
-        all_ecoinvent_products = list(
-            set([i.as_dict()['reference product'] for i in bw2.Database('ecoinvent-3.9.1-cutoff')]))
-        # Swiss processes are decicated to Switzerland's context, there is no use to adapt them to other countries
-        only_swiss_products = [i for i in all_ecoinvent_products if 'Swiss' in i] + [
-            'transport, passenger train, regional', 'transport, passenger train, long-distance',
-            'transport, passenger train, urban']
-        # list of the processes which are the core of the regionalization
-        regionalization_core = ['heat, district or industrial, natural gas',
-                                'heat, district or industrial, other than natural gas',
-                                'heat, central or small-scale, other than natural gas',
-                                'municipal solid waste',
-                                'electricity, high voltage, aluminium industry',
-                                'electricity, medium voltage, aluminium industry',
-                                'electricity, high voltage, cobalt industry',
-                                'electricity, medium voltage, cobalt industry',
-                                'electricity, high voltage',
-                                'electricity, medium voltage',
-                                'electricity, low voltage']
+        # in a second time, we regionalize the most relevant other products, see doc/ to see how we selected those
+        with open(pkg_resources.resource_filename(
+                __name__, '/Data/Regionalization/ei' + self.ecoinvent_version +
+                          '/relevant_non_traded_products.json'), 'r') as f:
+            relevant_non_traded_products = json.load(f)
 
-        self.logger.info("Determining the required geographies for the regionalization of non-internationally traded processes...")
-        # for each product, we need to determine which geographies are needed, i.e., we look at all processes of
-        # regioinvent and check which are the locations of the processes using each of our products-to-regionalize
-        geographies_needed = {i: [] for i in all_ecoinvent_products}
-        for product in tqdm(set(all_ecoinvent_products) - set(only_swiss_products) - set(regionalization_core), leave=True):
-            if product not in self.eco_to_hs_class.keys():
-                for ds in self.regioinvent_in_wurst:
-                    if 'consumption market' not in ds['name'] and 'export market' not in ds['name']:
-                        for exc in ds['exchanges']:
-                            if exc['type'] == 'technosphere':
-                                try:
-                                    if exc['product'] == product:
-                                        if ds['location'] not in geographies_needed[product]:
-                                            geographies_needed[product].append(ds['location'])
-                                        continue
-                                except KeyError:
-                                    pass
+        # get all the geographies of regioinvent
+        with open(pkg_resources.resource_filename(
+                __name__, '/Data/Spatialization_of_elementary_flows/ei' + self.ecoinvent_version +
+                          '/geographies_of_regioinvent.json'), 'r') as f:
+            geographies_needed = json.load(f)
 
         self.logger.info("Regionalizing main inputs of non-internationally traded processes of ecoinvent...")
-        # then we regionalize them, based on the geographies that are needed
-        for product in tqdm(set(all_ecoinvent_products) - set(only_swiss_products) - set(regionalization_core)):
-            if product not in self.eco_to_hs_class.keys():
-                filter_processes = ws.get_many(self.ei_wurst, ws.equals("reference product", product),
-                                               ws.exclude(ws.contains("name", "market for")),
-                                               ws.exclude(ws.contains("name", "market group for")),
-                                               ws.exclude(ws.contains("name", "generic market")),
-                                               ws.exclude(ws.contains("name", "import from")))
+        for product in tqdm(relevant_non_traded_products, leave=True):
+            filter_processes = ws.get_many(self.ei_wurst, ws.equals("reference product", product),
+                                           ws.exclude(ws.contains("name", "market for")),
+                                           ws.exclude(ws.contains("name", "market group for")),
+                                           ws.exclude(ws.contains("name", "generic market")),
+                                           ws.exclude(ws.contains("name", "import from")))
 
-                # there can be multiple technologies to produce the same product, register all possibilities
-                available_geographies = []
-                available_technologies = []
-                for dataset in filter_processes:
-                    available_geographies.append(dataset['location'])
-                    available_technologies.append(dataset['name'])
-                # extract each available geography processes of ecoinvent, per technology of production
-                possibilities = {tech: [] for tech in available_technologies}
-                for i, geo in enumerate(available_geographies):
-                    possibilities[available_technologies[i]].append(geo)
+            # there can be multiple technologies to produce the same product, register all possibilities
+            available_geographies = []
+            available_technologies = []
+            for dataset in filter_processes:
+                available_geographies.append(dataset['location'])
+                available_technologies.append(dataset['name'])
+            # extract each available geography processes of ecoinvent, per technology of production
+            possibilities = {tech: [] for tech in available_technologies}
+            for i, geo in enumerate(available_geographies):
+                possibilities[available_technologies[i]].append(geo)
 
-                geos_to_create = set(geographies_needed[product]) - set([x for xs in possibilities.values() for x in xs])
-
-                def copy_process(product, activity, region, prod_country):
-                    """
-                    Fonction that copies a process from ecoinvent
-                    :param product: [str] name of the reference product
-                    :param activity: [str] name of the activity
-                    :param region: [str] name of the location of the original ecoinvent process
-                    :param prod_country: [str] name of the location of the created regioinvent process
-                    :return: a copied and modified process of ecoinvent
-                    """
-                    # filter the process to-be-copied
-                    process = ws.get_one(self.ei_wurst,
-                                         ws.equals("reference product", product),
-                                         ws.equals("name", activity),
-                                         ws.equals("location", region),
-                                         ws.equals("database", self.name_ei_with_regionalized_biosphere),
-                                         ws.exclude(ws.contains("name", "market for")),
-                                         ws.exclude(ws.contains("name", "market group for")),
-                                         ws.exclude(ws.contains("name", "generic market")),
-                                         ws.exclude(ws.contains("name", "import from")))
-                    regio_process = copy.deepcopy(process)
-                    # change location
-                    regio_process['location'] = prod_country
-                    # change code
-                    regio_process['code'] = uuid.uuid4().hex
-                    # change database
-                    regio_process['database'] = self.regioinvent_database_name
-                    # add comment
-                    regio_process[
-                        'comment'] = f"""This process is a regionalized adaptation of the following process of the ecoinvent database: {activity} | {product} | {region}. No amount values were modified in the regionalization process, only the origin of the flows."""
-                    # update production exchange
-                    [i for i in regio_process['exchanges'] if i['type'] == 'production'][0]['code'] = regio_process['code']
-                    [i for i in regio_process['exchanges'] if i['type'] == 'production'][0]['database'] = regio_process[
-                        'database']
-                    [i for i in regio_process['exchanges'] if i['type'] == 'production'][0]['location'] = regio_process[
-                        'location']
-                    [i for i in regio_process['exchanges'] if i['type'] == 'production'][0]['input'] = (
+            def copy_process(product, activity, region, prod_country):
+                """
+                Fonction that copies a process from ecoinvent
+                :param product: [str] name of the reference product
+                :param activity: [str] name of the activity
+                :param region: [str] name of the location of the original ecoinvent process
+                :param prod_country: [str] name of the location of the created regioinvent process
+                :return: a copied and modified process of ecoinvent
+                """
+                # filter the process to-be-copied
+                process = ws.get_one(self.ei_wurst,
+                                     ws.equals("reference product", product),
+                                     ws.equals("name", activity),
+                                     ws.equals("location", region),
+                                     ws.equals("database", self.name_ei_with_regionalized_biosphere),
+                                     ws.exclude(ws.contains("name", "market for")),
+                                     ws.exclude(ws.contains("name", "market group for")),
+                                     ws.exclude(ws.contains("name", "generic market")),
+                                     ws.exclude(ws.contains("name", "import from")))
+                regio_process = copy.deepcopy(process)
+                # change location
+                regio_process['location'] = prod_country
+                # change code
+                regio_process['code'] = uuid.uuid4().hex
+                # change database
+                regio_process['database'] = self.regioinvent_database_name
+                # add comment
+                regio_process[
+                    'comment'] = f"""This process is a regionalized adaptation of the following process of the ecoinvent database: {activity} | {product} | {region}. No amount values were modified in the regionalization process, only the origin of the flows."""
+                # update production exchange
+                [i for i in regio_process['exchanges'] if i['type'] == 'production'][0]['code'] = regio_process['code']
+                [i for i in regio_process['exchanges'] if i['type'] == 'production'][0]['database'] = regio_process[
+                    'database']
+                [i for i in regio_process['exchanges'] if i['type'] == 'production'][0]['location'] = regio_process[
+                    'location']
+                [i for i in regio_process['exchanges'] if i['type'] == 'production'][0]['input'] = (
                     regio_process['database'], regio_process['code'])
-                    return regio_process
+                return regio_process
 
-                # some processes are just not used anywhere, no need to regionalize them then
-                if geos_to_create:
-                    for technology in possibilities.keys():
-                        # do not regionalize irelevant processes
-                        if [product, technology] not in self.no_inputs_processes:
-                            # loop through geos
-                            for geo in geos_to_create:
-                                # reset regio_process variable
-                                regio_process = None
-                                # if the producing country is available in the geographies of the ecoinvent production technologies
-                                if geo in possibilities[technology] and geo not in ['RoW']:
-                                    regio_process = copy_process(product, technology, geo, geo)
-                                # if a region associated with producing country is available in the geographies of the ecoinvent production technologies
-                                elif geo in self.country_to_ecoinvent_regions:
-                                    for potential_region in self.country_to_ecoinvent_regions[geo]:
-                                        if potential_region in possibilities[technology]:
-                                            regio_process = copy_process(product, technology, potential_region, geo)
-                                # otherwise, take either RoW, GLO or a random available geography
-                                if not regio_process:
-                                    if 'RoW' in possibilities[technology]:
-                                        regio_process = copy_process(product, technology, 'RoW', geo)
-                                    elif 'GLO' in possibilities[technology]:
-                                        regio_process = copy_process(product, technology, 'GLO', geo)
-                                    else:
-                                        if possibilities[technology]:
-                                            # if no RoW/GLO processes available, take the first available geography by default...
-                                            regio_process = copy_process(product, technology, possibilities[technology][0],
-                                                                         geo)
-                                            self.assigned_random_geography.append([product, technology, geo])
+            def copy_market(product, region, prod_country):
+                """
+                Fonction that copies a market process from ecoinvent
+                :param product: [str] name of the reference product
+                :param region: [str] name of the location of the original ecoinvent process
+                :param prod_country: [str] name of the location of the created regioinvent process
+                :return: a copied and modified market process of ecoinvent
+                """
 
-                                # for each input, we test the presence of said inputs and regionalize that input
-                                # testing the presence allows to save time if the input in question is just not used by the process
-                                if regio_process:
-                                    # aluminium specific electricity input
-                                    if self.test_input_presence(regio_process, 'electricity',
-                                                                extra='aluminium/electricity'):
-                                        regio_process = self.change_aluminium_electricity(regio_process, geo)
-                                    # cobalt specific electricity input
-                                    elif self.test_input_presence(regio_process, 'electricity', extra='cobalt/electricity'):
-                                        regio_process = self.change_cobalt_electricity(regio_process)
-                                    # normal electricity input
-                                    elif self.test_input_presence(regio_process, 'electricity', extra='voltage'):
-                                        regio_process = self.change_electricity(regio_process, geo)
-                                    # municipal solid waste input
-                                    if self.test_input_presence(regio_process, 'municipal solid waste'):
-                                        regio_process = self.change_waste(regio_process, geo)
-                                    # heat, district or industrial, natural gas input
-                                    if self.test_input_presence(regio_process, 'heat, district or industrial, natural gas'):
-                                        regio_process = self.change_heat(regio_process, geo,
-                                                                         'heat, district or industrial, natural gas')
-                                    # heat, district or industrial, other than natural gas input
-                                    if self.test_input_presence(regio_process,
-                                                                'heat, district or industrial, other than natural gas'):
-                                        regio_process = self.change_heat(regio_process, geo,
-                                                                         'heat, district or industrial, other than natural gas')
-                                    # heat, central or small-scale, other than natural gas input
-                                    if self.test_input_presence(regio_process,
-                                                                'heat, central or small-scale, other than natural gas'):
-                                        regio_process = self.change_heat(regio_process, geo,
-                                                                         'heat, central or small-scale, other than natural gas')
-                                # register the regionalized process within the wurst database
-                                if regio_process:
-                                    self.regioinvent_in_wurst.append(regio_process)
+                # filter the process to-be-copied
+                market_process = ws.get_one(self.ei_wurst,
+                                            ws.equals("reference product", product),
+                                            ws.equals("location", region),
+                                            ws.equals("database", self.name_ei_with_regionalized_biosphere),
+                                            ws.either(ws.contains('name', 'market for'),
+                                                      ws.contains('name', 'market group for')),
+                                            ws.exclude(ws.contains("name", "generic market")),
+                                            ws.exclude(ws.contains("name", "to market")))
 
-        self.logger.info(f"{len(self.regioinvent_in_wurst)} new regionalized processes were created")
+                regio_process = copy.deepcopy(market_process)
+                # change location
+                regio_process['location'] = prod_country
+                # change code
+                regio_process['code'] = uuid.uuid4().hex
+                # change database
+                regio_process['database'] = self.regioinvent_database_name
+                # add comment
+                regio_process[
+                    'comment'] = f"""This process is a regionalized adaptation of the following process of the ecoinvent database: {regio_process['name']} | {product} | {region}. No amount values were modified in the regionalization process, only the origin of the flows."""
+                # we rename the activity because just having "market for..." is confusing
+                regio_process['name'] = "technology mix for " + product
+                # update production exchange
+                [i for i in regio_process['exchanges'] if i['type'] == 'production'][0]['code'] = regio_process['code']
+                [i for i in regio_process['exchanges'] if i['type'] == 'production'][0]['database'] = regio_process[
+                    'database']
+                [i for i in regio_process['exchanges'] if i['type'] == 'production'][0]['location'] = regio_process[
+                    'location']
+                [i for i in regio_process['exchanges'] if i['type'] == 'production'][0][
+                    'name'] = "technology mix for " + product
+                [i for i in regio_process['exchanges'] if i['type'] == 'production'][0]['input'] = (
+                    regio_process['database'], regio_process['code'])
+                return regio_process
+
+            # loop through technologies
+            for technology in possibilities.keys():
+                # do not regionalize irrelevant processes
+                if [product, technology] not in self.no_inputs_processes:
+                    # loop through geos
+                    for geo in geographies_needed:
+                        # reset regio_process variable
+                        regio_process = None
+                        # if the producing country is available in the geographies of the ecoinvent production technologies
+                        if geo in possibilities[technology] and geo not in ['RoW']:
+                            regio_process = copy_process(product, technology, geo, geo)
+                        # if a region associated with producing country is available in the geographies of the ecoinvent production technologies
+                        elif geo in self.country_to_ecoinvent_regions:
+                            for potential_region in self.country_to_ecoinvent_regions[geo]:
+                                if potential_region in possibilities[technology]:
+                                    regio_process = copy_process(product, technology, potential_region, geo)
+                        # otherwise, take either RoW, GLO or a random available geography
+                        if not regio_process:
+                            if 'RoW' in possibilities[technology]:
+                                regio_process = copy_process(product, technology, 'RoW', geo)
+                            elif 'GLO' in possibilities[technology]:
+                                regio_process = copy_process(product, technology, 'GLO', geo)
+                            else:
+                                if possibilities[technology]:
+                                    # if no RoW/GLO processes available, take the first available geography by default...
+                                    regio_process = copy_process(product, technology, possibilities[technology][0],
+                                                                 geo)
+                                    self.assigned_random_geography.append([product, technology, geo])
+
+                        # for each input, we test the presence of said inputs and regionalize that input
+                        # testing the presence allows to save time if the input in question is just not used by the process
+                        if regio_process:
+                            # aluminium specific electricity input
+                            if self.test_input_presence(regio_process, 'electricity',
+                                                        extra='aluminium/electricity'):
+                                regio_process = self.change_aluminium_electricity(regio_process, geo)
+                            # cobalt specific electricity input
+                            elif self.test_input_presence(regio_process, 'electricity', extra='cobalt/electricity'):
+                                regio_process = self.change_cobalt_electricity(regio_process)
+                            # normal electricity input
+                            elif self.test_input_presence(regio_process, 'electricity', extra='voltage'):
+                                regio_process = self.change_electricity(regio_process, geo)
+                            # municipal solid waste input
+                            if self.test_input_presence(regio_process, 'municipal solid waste'):
+                                regio_process = self.change_waste(regio_process, geo)
+                            # heat, district or industrial, natural gas input
+                            if self.test_input_presence(regio_process, 'heat, district or industrial, natural gas'):
+                                regio_process = self.change_heat(regio_process, geo,
+                                                                 'heat, district or industrial, natural gas')
+                            # heat, district or industrial, other than natural gas input
+                            if self.test_input_presence(regio_process,
+                                                        'heat, district or industrial, other than natural gas'):
+                                regio_process = self.change_heat(regio_process, geo,
+                                                                 'heat, district or industrial, other than natural gas')
+                            # heat, central or small-scale, other than natural gas input
+                            if self.test_input_presence(regio_process,
+                                                        'heat, central or small-scale, other than natural gas'):
+                                regio_process = self.change_heat(regio_process, geo,
+                                                                 'heat, central or small-scale, other than natural gas')
+                        # register the regionalized process within the wurst database
+                        if regio_process:
+                            self.regioinvent_in_wurst.append(regio_process)
+
+            # copy markets and rename them as technology mix
+            for geo in geographies_needed:
+                # check that this is not a market full or irrelevant products/processes
+                if {k: v for k, v in possibilities.items() if [product, k] not in self.no_inputs_processes}:
+                    # reset regio_market variable
+                    regio_market = None
+
+                    # now we work on finding the technology mix to copy
+                    if not regio_market:
+                        # try to find the national technology mix from ecoinvent if it exists
+                        try:
+                            regio_market = copy_market(product, geo, geo)
+                        except NoResults:
+                            if geo != 'RoW':
+                                # if it does not, try your luck with the regions the country belongs to
+                                for potential_region in self.country_to_ecoinvent_regions[geo]:
+                                    try:
+                                        regio_market = copy_market(product, potential_region, geo)
+                                    except NoResults:
+                                        pass
+                        if not regio_market:
+                            try:
+                                # still no luck? let's go for RoW and GLO
+                                regio_market = copy_market(product, 'RoW', geo)
+                            except NoResults:
+                                try:
+                                    regio_market = copy_market(product, 'GLO', geo)
+                                except NoResults:
+                                    # waw really unlucky... well let's just take a random one then
+                                    regio_market = copy_market(product, possibilities[technology][0], geo)
+                                    self.assigned_random_geography.append([product, 'market for', geo])
+                    # register the regionalized technology mix within the wurst database
+                    if regio_market:
+                        self.regioinvent_in_wurst.append(regio_market)
 
     def create_consumption_markets(self):
         """
@@ -821,7 +865,7 @@ class Regioinvent:
         :return:  self.regioinvent_in_wurst with new regionalized processes
         """
 
-        self.logger.info("Creating consumption markets...")
+        self.logger.info("Creating consumption markets for internationally-traded products...")
 
         # change to dictionary to speed searching for info
         self.regioinvent_in_dict = {tech: [] for tech in
@@ -955,55 +999,29 @@ class Regioinvent:
 
         self.logger.info("Performing second order regionalization...")
 
-        # first step is to connect regioinvent processes to created water processes from self.fix_ecoinvent_water()
-        if self.regio_bio:
-            techno_water_flows = ['irrigation', 'water, deionised', 'water, ultrapure', 'water, decarbonised',
-                                  'water, completely softened', 'tap water', 'wastewater, average',
-                                  'wastewater, unpolluted']
-            # loop through all created processes
-            for process in self.regioinvent_in_wurst:
-                # only for production processes (not for markets)
-                if 'consumption market' not in process['name'] and 'production market' not in process['name']:
-                    # loop through exchanges
-                    for exc in process['exchanges']:
-                        # if it's a technosphere exchange
-                        if exc['type'] == 'technosphere':
-                            # about water
-                            if exc['product'] in techno_water_flows:
-                                # except some that are annoying
-                                if (not (exc['product'] == 'water, decarbonised' and
-                                         exc['name'] == 'diethyl ether production') and not (
-                                        exc['product'] == 'water, ultrapure' and process['location'] == 'CA-QC')):
-                                    # then replace the wrong water process by the regionalized version
-                                    try:
-                                        replace_process = self.ei_in_dict[
-                                            (exc['product'], process['location'], exc['name'])]
-                                    except KeyError:
-                                        if exc['name'] == 'market for tap water':
-                                            replace_process = self.ei_in_dict[(
-                                                exc['product'], process['location'], 'market group for tap water')]
-                                        if exc['name'] == 'market group for tap water':
-                                            replace_process = self.ei_in_dict[(
-                                                exc['product'], process['location'], 'market for tap water')]
-                                        if exc['name'] == 'market group for irrigation':
-                                            replace_process = self.ei_in_dict[(
-                                                exc['product'], process['location'], 'market for irrigation')]
-                                    exc['code'] = replace_process['code']
-                                    exc['name'] = replace_process['name']
-                                    exc['product'] = replace_process['reference product']
-                                    exc['input'] = (self.name_ei_with_regionalized_biosphere, exc['code'])
-
-        # as dictionary to speed up searching for info
+        # format required information as dictionary to speed up searching
         consumption_markets_data = {(i['name'], i['location']): i for i in self.regioinvent_in_wurst if
                                     'consumption market' in i['name']}
+        other_processes_data = collections.defaultdict(list)
+        for i in self.regioinvent_in_wurst:
+            if (
+                    'consumption market' not in i['name'] and
+                    'production market' not in i['name'] and
+                    i['reference product'] not in self.eco_to_hs_class
+            ):
+                key = (i['reference product'], i['location'])
+                other_processes_data[key].append(i)
+        regionalized_products = set([i['reference product'] for i in self.regioinvent_in_wurst])
+        techno_mixes = {(i['name'], i['location']): i['code'] for i in self.regioinvent_in_wurst if
+                        'technology mix' in i['name']}
 
         # loop through created processes
-        for process in self.regioinvent_in_wurst:
+        for process in tqdm(self.regioinvent_in_wurst, leave=True):
             # only for production processes (not for markets)
-            if 'consumption market' not in process['name'] and 'production market' not in process['name']:
+            if ('consumption market' not in process['name'] and 'production market' not in process['name'] and
+                    "technology mix" not in process['name']):
                 # loop through exchanges
                 for exc in process['exchanges']:
-                    # if the exchange is about one of the products that have been regionalized
                     if exc['product'] in self.eco_to_hs_class.keys() and exc['type'] == 'technosphere':
                         # then get the name of the created consumption market for that product
                         exc['name'] = 'consumption market for ' + exc['product']
@@ -1027,6 +1045,23 @@ class Regioinvent:
                             exc['code'] = (consumption_markets_data[('consumption market for ' +
                                                                      exc['product'], 'RoW')]['code'])
                         exc['input'] = (exc['database'], exc['code'])
+                    elif exc['product'] in regionalized_products and exc['type'] == 'technosphere':
+                        # connect to technology mix for the country
+                        exc['name'] = 'technology mix for ' + exc['product']
+                        exc['location'] = process['location']
+                        exc['code'] = techno_mixes[('technology mix for ' + exc['product'], process['location'])]
+                        exc['database'] = self.regioinvent_database_name
+                        exc['input'] = (exc['database'], exc['code'])
+            elif "technology mix" in process['name']:
+                for exc in process['exchanges']:
+                    for i in range(0, len(other_processes_data[(exc['product'], process['location'])])):
+                        # find correct technology for production
+                        if other_processes_data[(exc['product'], process['location'])][i]['name'] == exc['name']:
+                            # change info
+                            exc['code'] = other_processes_data[(exc['product'], process['location'])][i]['code']
+                            exc['database'] = self.regioinvent_database_name
+                            exc['location'] = process['location']
+                            exc['input'] = (exc['database'], exc['code'])
 
         # aggregating duplicate inputs (e.g., multiple consumption markets RoW callouts)
         for process in self.regioinvent_in_wurst:
@@ -1043,7 +1078,63 @@ class Regioinvent:
                 total = sum([i['amount'] for i in process['exchanges'] if i['input'] == duplicate])
                 process['exchanges'] = [i for i in process['exchanges'] if
                                         i['input'] != duplicate] + [
-                                           {'amount': total, 'type': 'technosphere', 'input': duplicate}]
+                                           {'amount': total, 'type': 'technosphere', 'input': duplicate,
+                                            'name': exc['name'], 'database': exc['database'],
+                                            'product': exc['product'], 'location': exc['location']}]
+
+    def culling_the_weak(self):
+        """
+        With non-internationally traded commodities, all possible geographeis are created. Even if a lot of them are
+        useless actually. No need for a chemical organics, factory in Andorra, if there is no process actually needing
+        that. Philosophy here is that these commodities are not what the user require, but more so supporting commodities.
+        So yeah, this function checks which processes are useful and culls those are not.
+        :return:
+        """
+
+        used_techno_mixes = []
+
+        for process in self.regioinvent_in_wurst:
+            if ('consumption market' not in process['name'] and 'production market' not in process['name'] and
+                    process['reference product'] in self.eco_to_hs_class.keys()):
+                for exc in process['exchanges']:
+                    if 'technology mix' in exc['name']:
+                        if (exc['name'], exc['product'], exc['location']) not in used_techno_mixes:
+                            used_techno_mixes.append((exc['name'], exc['product'], exc['location']))
+
+        reduced_regioinvent = []
+
+        for ds in self.regioinvent_in_wurst:
+            if 'technology mix' in ds['name']:
+                if (ds['name'], ds['reference product'], ds['location']) in used_techno_mixes:
+                    reduced_regioinvent.append(ds)
+            else:
+                reduced_regioinvent.append(ds)
+
+        self.regioinvent_in_wurst = copy.copy(reduced_regioinvent)
+
+        used_prod_processes = []
+        regionalized_products = set([i['reference product'] for i in self.regioinvent_in_wurst])
+        for process in self.regioinvent_in_wurst:
+            if 'technology mix' in process['name']:
+                for exc in process['exchanges']:
+                    if (exc['type'] == 'technosphere' and exc['product'] in regionalized_products and exc[
+                        'product'] not in self.eco_to_hs_class.keys() and
+                            'technology mix' not in exc['name']):
+                        if (exc['name'], exc['product'], exc['location']) not in used_prod_processes:
+                            used_prod_processes.append((exc['name'], exc['product'], exc['location']))
+
+        even_more_reduced_regioinvent = []
+
+        for ds in self.regioinvent_in_wurst:
+            if ('technology mix' not in ds['name'] and 'consumption market' not in ds['name'] and
+                    'production market' not in ds['name'] and ds[
+                        'reference product'] not in self.eco_to_hs_class.keys()):
+                if (ds['name'], ds['reference product'], ds['location']) in used_prod_processes:
+                    even_more_reduced_regioinvent.append(ds)
+            else:
+                even_more_reduced_regioinvent.append(ds)
+
+        self.regioinvent_in_wurst = copy.copy(even_more_reduced_regioinvent)
 
     def spatialize_elem_flows(self):
         """
