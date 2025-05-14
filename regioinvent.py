@@ -191,6 +191,10 @@ class Regioinvent:
                         # if it's a technosphere exchange, just update the database value
                         else:
                             exc['database'] = self.name_ei_with_regionalized_biosphere
+                # if you are an aggregated process (S)
+                elif len(process['exchanges']) > 1000:
+                    # simply change the name of the database
+                    process['database'] = self.name_ei_with_regionalized_biosphere
 
             # sometimes input keys disappear with wurst, make sure there is always one
             for pr in self.ei_wurst:
