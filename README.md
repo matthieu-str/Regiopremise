@@ -12,10 +12,12 @@ and connects these spatialized elementary flows to regionalized life cycle impac
 three LCIA regionalized methods implemented: IMPACT World+ v2.1 / EF 3.1 / ReCiPe 2016 v1.03 (H).
 
 ## Showcase
-To showcase what ```Regioinvent``` does, let's illustrate on an example: the production of diethanolamine in Sweden. 
-The production of diethanolamine in ecoinvent is also available for RER and RoW.
+To showcase what ```Regioinvent``` does, let's illustrate on a random example: the production of diethanolamine in Sweden.
 
-Screenshot below shows the starting point of this example: the diethanolamine production process for Europe.
+Within ecoinvent, the production of diethanolamine is only available for Europe (RER) and Rest-of-the-World (RoW).
+
+Screenshot below shows the diethanolamine production process for Europe (values are hidden for ecoinvent licensing reason).
+Notice how there is absolutely nothing adapted for the Swedish context, which is normal since it's for Europe as a whole.
 
 <img src="images/diethanolamine_rer_production.png" width="600"/>
 
@@ -23,34 +25,42 @@ Screenshot below shows the starting point of this example: the diethanolamine pr
 After running ```Regioinvent``` three types of processes are created.
 1. National production processes <br>
 
-Below you can see the example for the Swedish production but the code also created such production processes for many countries.
+National production processes for many countries and all traded commodities of ecoinvent are created automatically.
+Below you can see the example for the Swedish production. Now you can see that basically everything adapted to the 
+Swedish context, energy vectors (electricity/heat), consumables (ammonia) and even capital goods (chemical factory).
 
 <img src="images/diethanolamine_swedish_prod.png" width="600"/>
 
 2. National consumption markets <br>
 
-Below you can see the example for the Swedish consumption market but the code also created such consumption markets for many countries.
+National consumption markets representing the average origin of a commodity purchased in a given country, based on
+import and domestic production data are created. Below you can see the example for the Swedish consumption market of 
+ammonia that is used in the production of diethanolamine.
+We can see that Sweden is importing ammonia mainly from Russia (~73%), from the Netherlands (~7%) and from Algeria (~5%).
+Of course these production processes of ammonia in these respective countries were created along all the other national 
+production processes.
 
-<img src="images/diethanolamine_swedish_consumption.png" width="600"/>
+<img src="images/ammonia_swedish_consumption_market.png" width="600"/>
 
-3. A global export market <br>
+3. A global production market <br>
 
-The global export market shows the biggest exporters of the commodity worldwide.
+Global production markets, representing the global production shares for each commodity, are also created. Below you can
+see the one for the production of diethanolamine which, according to our data, is mostly produced in Saudi Arabia (~55%),
+Malaysia (~10%), Belgium (~10%), Germany (~8%) and Sweden (~5%).
 
 
-<img src="images/diethanolamine_global_export_market.png" width="600"/>
+<img src="images/diethanolamine_global_production_market.png" width="600"/>
 
 
 ## ```Regioinvent``` in your LCAs
 Use the three types of processes generated with ```Regioinvent``` as follows:
 - If you know where the production of your commodity occurs, select the corresponding national production process. Either
 for the location exactly, or, if unavailable, the RoW version which is an aggregate of all the countries not being in the
-biggest producers.
+biggest producers. (Of course add some transportation on top of these processes to model their distribution)
 - If you don't know where the production of your commodity occurs, BUT you know where it was bought, rely on the consumption
 markets. These describe where the commodity should come from on average, given the trade of the region.
 - If you don't know anything about the process, you can either use the RoW or GLO process of ecoinvent, or rely on the 
-global export process of ```Regioinvent``` as a proxy. Note however that it is an export market. It does not include the
-domestic production in the shares of that market.
+global production process of ```Regioinvent```.
 
 ## Get started
 
@@ -62,9 +72,10 @@ You will need a few things to get started:
 - Download the BACI database that was already extracted.
 You can download it from [here](https://doi.org/10.5281/zenodo.11583814)
 - Install ```brightway2``` and have a brightway2 project with either ecoinvent3.9.1 cut-off or ecoinvent3.10.1 cut-off
+- Install the other needed modules within the requirements.txt file
 
-Note that regioinvent currently only supports the ecoinvent 3.9.1/3.10.1 cut-off version and operates solely on brightway2 (NOT 
-brightway2.5).
+Note that regioinvent currently only supports the ecoinvent 3.9.1/3.10.1 cut-off version and operates solely on 
+brightway2 (NOT brightway2.5).
 
 You can then follow the steps presented in the [demo.ipynb](https://github.com/CIRAIG/Regioinvent/tree/master/doc/demo.ipynb) 
 Jupyter notebook.
@@ -74,8 +85,11 @@ Required python version: 3.11
 ## How to use after running the code?
 Once the regionalized version of ecoinvent is created on Python, you can export it to brightway2. You will then be able to
 perform your LCAs either through brightway2 or its GUI activity-browser as you would with the regular ecoinvent database. <br> 
-Do note that calculations are longer with ```Regioinvent``` (~5 to 10 minutes calculation for the first run). <br>
-There are currently no support for other LCA software, as SimaPro and openLCA are not able to support the size of the database.
+Do note that calculations can be longer with ```Regioinvent``` depending on the cutoff you select. WIth a cutoff of 0.75,
+calculations times are similar to with normal ecoinvent (a few seconds). With a cutoff of 0.99, the size increases 
+dramatically, and so does the calculation time (from 5 to 15 minutes depending on your machine). <br>
+There are currently no support for other LCA software, as SimaPro and openLCA are not able to support the size of the
+regioinvent database.
 
 ## Overview of the methodology
 

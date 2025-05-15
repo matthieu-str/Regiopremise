@@ -10,18 +10,17 @@ The methodology is divided into multiple sections:
 4. [Selection of commodities to regionalize](#selection-of-commodities-to-regionalize)
 5. [Selection of countries for regionalization](#selection-of-countries-for-regionalization)
 6. [Regionalizing - creating national production process](#regionalizing---creating-national-production-process)
-7. [Regionalizing - creating global export market processes](#regionalizing---creating-global-production-market-processes)
+7. [Regionalizing - creating global production market processes](#regionalizing---creating-global-production-market-processes)
 8. [Regionalizing - creating national consumption market processes](#regionalizing---creating-national-consumption-market-processes)
 9. [Modeling transportation in the created markets](#modeling-transportation-in-the-created-markets)
 10. [How to deal with multiple technologies of production](#how-to-deal-with-multiple-technologies-of-production)
 11. [Dealing with yearly fluctuation of trade data](#dealing-with-yearly-fluctuation-of-trade-data)
 12. [Spatialization of elementary flows](#spatialization-of-elementary-flows)
 13. [Regionalized life cycle impact assessment methods](#regionalized-life-cycle-impact-assessment-methods)
-14. [The water regionalization issue with ecoinvent](#the-water-regionalization-issue-with-ecoinvent)
-15. [Connecting ecoinvent processes to UN COMTRADE commodities](#connecting-ecoinvent-processes-to-un-comtrade-commodities)
-16. [Connecting ecoinvent geographies to UN COMTRADE geographies](#connecting-ecoinvent-geographies-to-un-comtrade-geographies)
-17. [Connecting EXIOBASE sectors to UN COMTRADE commodities](#connecting-exiobase-sectors-to-un-comtrade-commodities)
-18. [Connecting EXIOBASE geographies to UN COMTRADE geographies](#connecting-exiobase-geographies-to-un-comtrade-geographies)
+14. [Connecting ecoinvent processes to UN COMTRADE commodities](#connecting-ecoinvent-processes-to-un-comtrade-commodities)
+15. [Connecting ecoinvent geographies to UN COMTRADE geographies](#connecting-ecoinvent-geographies-to-un-comtrade-geographies)
+16. [Connecting EXIOBASE sectors to UN COMTRADE commodities](#connecting-exiobase-sectors-to-un-comtrade-commodities)
+17. [Connecting EXIOBASE geographies to UN COMTRADE geographies](#connecting-exiobase-geographies-to-un-comtrade-geographies)
  
 
 ### Selection of the trade database
@@ -35,7 +34,7 @@ However, the UN COMTRADE database has inconsistencies. Imports and exports are n
 Furthermore, there are a few missing data points for some years/commodities/countries combinations, as well as blatant
 reporting mistakes. In the first versions of regionvent (< v1.2) we tried to correct these inconsistencies ourselves. 
 Unfortunately it is very time-consuming and requires a lot of expertise which we lack. Therefore, from the v1.2 of 
-regioinvent, we rely on the BACI database (https://www.cepii.fr/CEPII/en/bdd_modele/bdd_modele_item.asp?id=37), 
+regioinvent onward, we rely on the BACI database (https://www.cepii.fr/CEPII/en/bdd_modele/bdd_modele_item.asp?id=37), 
 which is an adaptation of the UN COMTRADE database where the aforementioned inconsistencies are already corrected.
 
 ### Estimation of production data
@@ -122,15 +121,32 @@ the 5 biggest exporters of bananas, e.g., Ecuador, etc.
 
 ### Selection of commodities to regionalize
 In regioinvent v1.3, there was a switch in philosophy. In previous versions, the focus was put on internationally-traded
-commodities, simply because they were the reason behind the introduction of consumption markets. However it left a lot
+commodities, simply because they were the reason behind the introduction of consumption markets. However, it left a lot
 of processes non-regionalized, which did not make much sense sometimes. The production of HFC-152a was regionalized, but
 the hot-rolling of steel was not, and regioinvent was thus still relying on RoW or GLO processes for transformation (for
-example). So in v1.3, now all processes are regionalized with three exceptions:
-- aggregated processes (S)
-- completely empty processes (like Recycled content Cut-off stuff) because this increases the size of the database for 
-no reason
-- virtually empty processes, i.e., with no technosphere inputs and a few biosphere inputs, but the latter are not inputs
-needing spatialization, so regionalizing those is irrelevant
+example). So in v1.3, we now regionalize  non-internationally traded commodities as well. However, regionalizing
+them all would explode the size of the resulting database. We therefore onlt regionalized the most relevant of them.
+
+How do we determine which non-internationally traded commodities are relevant or not? For example, is "tap water" more
+relevant than "waste cement, hydrated"? To decide, we look at the contributions of these commodities among all the 
+processes of ecoinvent. You can follow the steps we describe below on the "Choosing which process to regionalize.ipynb"
+jupyter notebook. Then, if "tap water" contributes more to impact categories than "waste cement, hydrated", then tap water
+will be considered relevant (and thus will be regionalized) while waste cement, hydrated will be considered irrelevant
+(and thus won't be regionalized).
+
+We do the contribution analyses on all processes of ecoinvent, except market processes as the contribution of any commodity
+within their market will simply be 100%. That's around 13,000 and so around 13,000 contribution analyses to run. Then, 
+we need to decide how to weight the contributions on different impact categories. Maybe tap water is relevant for climate
+change, but that waste cement, hydrated is relevant for ionizing radiations. We rely on IW+ and the scientific weighting
+that is used to go from damage categories to the two area of protection (in DALY and in PDF.m2.yr). In the 13,000 contribution
+analyses we then only take the commodities which contribute on average (that is, across the 13,000 processes) to at least
+0.3%. 0.3% sounds random as a number and it kind of is. 1% would lead to barely nothing being regionalized for 
+non-internationally traded commodities, while 0.1% would lead to too many processes to regionalize. 0.3% leads to a
+manageable amount of extra regionalization to do (~75 commodities depending on the ei version). These commodities are 
+listed in the relevant_non_traded_products.json files which is then used by the code. If a user wants the maximum 
+possible regionalization they can input the whole list of commodities of ecoinvent in this json file. But be warned.
+You will most likely require a super computer to run that. Or at the very least a good 32GB of RAM with a good 
+CPU/SSD drive for it not to take forever to run.
 
 ### Selection of countries for regionalization
 Ideally, the commodities could be regionalized for all countries in the world. Practically speaking though, there
@@ -164,15 +180,16 @@ that will be represented, while consumption data is used to determine for which 
 created.
 
 So this is for internationally-traded commodities where we can base our geographies-to-cover on trade. What about 
-non-internationally-traded commodities (and transformation activities). Well, instead of regionalizing for all possible 
-countries/regions (that's 390 total countries/regions btw, across ecoinvent and regioinvent), we simply check who is
-using these processes, and more specifically, which location. So for my hot-rolling of steel, I will check which processes
-call "hot-rolling of steel", and create regionalized copies for these geographies. Identifying these geographies is not
-a straight forward process, as non-intrenationally traded commodities can also require other such commodities. We 
-therefore ran multiple iterations to catch all possible geographies needed, at the highest cut-off possible (0.99) and
-store these geographies_needed in a json file to be able to call them efficiently.
+non-internationally-traded commodities (and transformation activities). For them, we first thought of regionalizing
+for the geographies that were required given the cutoff selected. If no process in the database is gonna use "chemical
+factory, organics" in Andorra, why create it? The problem is that determine this list of used commodities/geography
+combination is actually extremely tricky to get, because everytime you add more geographies, these new geographies 
+require new commodities/geography combination to be created as well. And it basically snowballs. So instead of doing that
+we just directly regionalize for all the geographies used within regioinvent (which can be found in the 
+geographies_of_regioinvent.json files).
 
-
+_The paragraph on the effect of the cutoff below was written for regioinvent v1.2.2 and has not been updated for
+regioinvent v1.3 yet_ <br>
 The effect of the cutoff selection on the results was estimated between the cutoff: 99%, 90% and 75%. You can see these
 effects applied to the IW+ v2.1 LCIA method. The numbers represent the median relative difference between all processes
 that are covered in all three versions of regioinvent (i.e., regioinvent with 99%, 90% and 75% cutoff). Overall, if we
@@ -209,19 +226,20 @@ for "land tenure, arable land, measured as carbon net primary productivity, annu
 example), then the code will select a random available geography to be the base for the copy.
 
 ### Regionalizing - creating global production market processes
-The export data from the UN COMTRADE database is combined with domestic production estimates to form a total production
+The export data from the BACI database is combined with domestic production estimates to form a total production
 data. Then it is simply extracted for each commodity and used. Transportation is also added (see 
 [Transportation section](#modeling-transportation-in-the-created-markets)).
 
 ### Regionalizing - creating national consumption market processes
-The import data from the UN COMTRADE as well as the estimated domestic consumption data are summed up together to obtain
+The import data from the BACI as well as the estimated domestic consumption data are summed up together to obtain
 consumption data per country. Then this data is simply used to generate consumption markets. Transportation is also 
 added (see [Transportation section](#modeling-transportation-in-the-created-markets)).
 
 ### Modeling transportation in the created markets
 In the global production market and various national consumption markets created by regioinvent, transportation modes must be
-added. Regioinvent v1.3 only simply copies the transportation distribution of the original market (the one used for copy)
-and adds it to the new market. This simple copy and paste creates inconsistencies by adding transportation modes that are
+added. Regioinvent v1.3 only simply copies the transportation distribution of the ecoinvent markets providing the commodity, 
+adds it to the new market for regioinvent (either consumption market or production market), and averages it. 
+This simple copy and paste creates inconsistencies by adding transportation modes that are
 unadapted to the actual transportation that would occur between two countries. For example, there are processes of 
 transportation by tanker for imports from Germany to Switzerland, which obviously makes no sense. In later version of 
 regioinvent, we intend to regionalize at the very least the transportation distances and modes depending on the origin
@@ -235,7 +253,7 @@ Some commodities can be produced through various means. For instance, 1-butanol 
 "hydroformylation of propylene" but also through "synthetic fuel production, from coal, high temperature Fisher-Tropsch 
 operation". Production and trade data however, are only provided for the commodity overall. How then can we distribute
 each national market shares to the different technologies? Well in regioinvent, we calculate the distribution of the 
-technologies within the global production market (or its closest substitute if there is no GLO market, e.g, RoW) and
+technologies within the global production market of ecoinvent (or its closest substitute if there is no GLO market, e.g, RoW) and
 then simply reapply that technology share, to the national share. So, more concretely, if the hydroformylation of 
 propylene represents 80% of the production of 1-butanol overall, and that Canada represents 10% of global production 
 shares for 1-butanol, then regioinvent creates a Canadian process for both hydroformylation and Fisher-Tropsch, and adds
@@ -244,7 +262,16 @@ What does this choice entails? This assumption does not respect the actual techn
 Fisher-Tropsch from coal is probably not a technology that is used in Europe to produce 1-butanol for example, but is used
 in South Africa. But with the assumption made, we consider that Europe and South Africa produce 1-butanol with both 
 technologies. Refining these choices entails a deep expertise of technologies deployed throughout the world, and for many
-different commodities. However, this is not an expertise that is available to regioinvent.
+different commodities. However, this is not an expertise that is available to regioinvent's team.
+
+For non-internationally traded commodities, the shares of the ecoinvent markets are also simply copied and re-applied. 
+The difference with the consumption and production markets, is that we need to create another "market" for the distribution
+of these technologies producing non-internationally traded commodities (think of tap water, which can be produced from 
+"conventional treatment" or "direct filtration treatment"). Because just copying the ecoinvent markets and keeping their
+names would be confusing (you would have consumption markets, production markets and just "markets" and it's not clear
+what they are) we rename them. What markets are in ecoinvent are actually technology mixes. So we decided to create
+"technology mix for xxxx" processes to represent these distributions. So when you see a process "technology mix for" 
+think of the markets of ecoinvent.
 
 ### Dealing with yearly fluctuation of trade data
 To not be subject to the whims of the trade market changing constantly, which would affect the robustness from year to 
@@ -279,23 +306,8 @@ characterized and the results will mean nothing. You therefore cannot use regioi
 of brightway2. To be clear, there won't be any error and everything will work, but for impact categories with spatialized
 elementary flows, the results will be wrong.
 
-Regioinvent v1.2.2 operates with IMPACT World+ v2.1,  ReCiPe 2016 v1.03 (H) and EF 3.1. Users are welcome to contribute by 
+Regioinvent v1.3 operates with IMPACT World+ v2.1,  ReCiPe 2016 v1.03 (H) and EF 3.1. Users are welcome to contribute by 
 matching with other impact methods.
-
-### The water regionalization issue with ecoinvent
-The simple rule followed by regioinvent to spatialize elementary flows (i.e, just assigning the region of the process)
-creates imbalances for the water-related impact category (e.g., AWARE). This issues can also be found in regionalizations
-performed by Pré consultants (SimaPro) and GreenDelta (OpenLCA). What is the issue exactly? To explain it, we can take a
-look at the ecoinvent process for the production of apples in Chile (CL). In this process, there are releases of water, 
-both in air (evaporated water) and in water (rundown) as elementary flows and there is also an input of water that comes
-from the "market for irrigation" of the RoW region, so from the technosphere. After spatialization of elementary flows,
-we would thus have Chilean water coming out and RoW water coming in. This creates an imbalance as Chilean water might be 
-more scarce than the global average (for the RoW region). In reality, the water from irrigation likely is also Chilean 
-water. It's just that there is no Chilean irrigation process in the ecoinvent database. <br>
-So the solution is actually quite simple. Let's create those missing processes to ensure the coherence. Regioinvent 
-does just that. It focuses on 7 identified technosphere water flows where similar issues arise: ['irrigation', 
-'water, deionised', 'water, ultrapure', 'water, decarbonised', 'water, completely softened', 'tap water', 
-'wastewater, average', 'wastewater, unpolluted']. This creates more than 13,000 processes.
 
 ### Connecting ecoinvent processes to UN COMTRADE commodities
 This step is basically a giant mapping effort to be done between the names of ecoinvent commodities selected for 
