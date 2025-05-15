@@ -134,6 +134,7 @@ class Regioinvent:
         # ---------------------------- Create the spatialized biosphere ----------------------------
 
         if 'biosphere3_spatialized_flows' not in bw2.databases:
+            self.logger.info("Creating spatialized biosphere flows...")
             # load the correct pickle file with the different spatialized elementary flows metadata
             with open(pkg_resources.resource_filename(
                     __name__, '/Data/Spatialization_of_elementary_flows/ei' + self.ecoinvent_version +
@@ -195,6 +196,8 @@ class Regioinvent:
                 elif len(process['exchanges']) > 1000:
                     # simply change the name of the database
                     process['database'] = self.name_ei_with_regionalized_biosphere
+                    for exc in process['exchanges']:
+                        exc['database'] = self.name_ei_with_regionalized_biosphere
 
             # sometimes input keys disappear with wurst, make sure there is always one
             for pr in self.ei_wurst:
@@ -233,7 +236,7 @@ class Regioinvent:
             self.logger.info("There is already a spatialized version of ecoinvent in your project. If you want to redo "
                              "spatialization, please delete it and re-run.")
 
-    def import_fully_regionalized_impact_method(self, lcia_method):
+    def import_fully_regionalized_impact_method(self, lcia_method='all'):
         """
         Function to import a fully regionalized impact method into your brightway project, to-be-used with the
         spatialized version of ecoinvent. You can choose between IMPACT World+, EF and ReCiPe, or simply all of them.
@@ -1230,6 +1233,8 @@ class Regioinvent:
         Function write a dictionary of datasets to the brightway2 SQL database
         """
 
+        self.logger.info("Write regioinvent database to brightway...")
+
         # change regioinvent data from wurst to bw2 structure
         regioinvent_data = {(i['database'], i['code']): i for i in self.regioinvent_in_wurst}
 
@@ -1758,5 +1763,5 @@ class Regioinvent:
             for exc in ws.technosphere(process, ws.contains("name", input_name), ws.contains("name", "voltage")):
                 return True
         else:
-            for exc in ws.technosphere(process, ws.contains("name", input_name)):
+            for exc in ws.technosphere(process, ws.equals("product", input_name)):
                 return True
