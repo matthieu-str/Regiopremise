@@ -67,7 +67,7 @@ global production process of ```Regioinvent```.
 To get started you can git clone this repository or simply download it.
 
 You will need a few things to get started:
-- Have an ecoinvent license (obviously)
+- Regioinvent does not provide the ecoinvent database, so you need to buy an ecoinvent license yourself.
 - Download all the required trade data that were already extracted.
 You can download it from [here](https://doi.org/10.5281/zenodo.11583814). Make sure to take the latest available version.
 - Install ```brightway2``` and have a brightway2 project with either ecoinvent3.9.1 cut-off or ecoinvent3.10.1 cut-off
