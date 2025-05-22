@@ -26,7 +26,7 @@ After running ```Regioinvent``` three types of processes are created.
 1. National production processes <br>
 
 National production processes for many countries and all traded commodities of ecoinvent are created automatically.
-Below you can see the example for the Swedish production. Now you can see that basically everything adapted to the 
+Below you can see the example for the Swedish production. Now you can see that basically everything is adapted to the 
 Swedish context, energy vectors (electricity/heat), consumables (ammonia) and even capital goods (chemical factory).
 
 <img src="images/diethanolamine_swedish_prod.png" width="600"/>
@@ -37,8 +37,7 @@ National consumption markets representing the average origin of a commodity purc
 import and domestic production data are created. Below you can see the example for the Swedish consumption market of 
 ammonia that is used in the production of diethanolamine.
 We can see that Sweden is importing ammonia mainly from Russia (~73%), from the Netherlands (~7%) and from Algeria (~5%).
-Of course these production processes of ammonia in these respective countries were created along all the other national 
-production processes.
+Of course, all these national production processes of ammonia were created along all the other national production processes.
 
 <img src="images/ammonia_swedish_consumption_market.png" width="600"/>
 
@@ -58,7 +57,7 @@ Use the three types of processes generated with ```Regioinvent``` as follows:
 for the location exactly, or, if unavailable, the RoW version which is an aggregate of all the countries not being in the
 biggest producers. (Of course add some transportation on top of these processes to model their distribution)
 - If you don't know where the production of your commodity occurs, BUT you know where it was bought, rely on the consumption
-markets. These describe where the commodity should come from on average, given the trade of the region.
+markets. These describe where the commodity should come from, on average, given the trade of the region.
 - If you don't know anything about the process, you can either use the RoW or GLO process of ecoinvent, or rely on the 
 global production process of ```Regioinvent```.
 
@@ -69,12 +68,12 @@ To get started you can git clone this repository or simply download it.
 
 You will need a few things to get started:
 - Have an ecoinvent license (obviously)
-- Download the BACI database that was already extracted.
-You can download it from [here](https://doi.org/10.5281/zenodo.11583814)
+- Download all the required trade data that were already extracted.
+You can download it from [here](https://doi.org/10.5281/zenodo.11583814). Make sure to take the latest available version.
 - Install ```brightway2``` and have a brightway2 project with either ecoinvent3.9.1 cut-off or ecoinvent3.10.1 cut-off
 - Install the other needed modules within the requirements.txt file
 
-Note that regioinvent currently only supports the ecoinvent 3.9.1/3.10.1 cut-off version and operates solely on 
+Note that regioinvent currently only supports the ecoinvent 3.9/3.9.1/3.10/3.10.1 cut-off versions and operates solely on 
 brightway2 (NOT brightway2.5).
 
 You can then follow the steps presented in the [demo.ipynb](https://github.com/CIRAIG/Regioinvent/tree/master/doc/demo.ipynb) 
@@ -83,15 +82,19 @@ Jupyter notebook.
 Required python version: 3.11
 
 ## How to use after running the code?
-Once the regionalized version of ecoinvent is created on Python, you can export it to brightway2. You will then be able to
-perform your LCAs either through brightway2 or its GUI activity-browser as you would with the regular ecoinvent database. <br> 
+Once the regionalized version of ecoinvent is created on Python, it will automatically be exported to your brightway2
+project. You will then be able to
+perform your LCAs either through brightway2 or activity-browser as you would with the regular ecoinvent database. <br> 
 Do note that calculations can be longer with ```Regioinvent``` depending on the cutoff you select. WIth a cutoff of 0.75,
-calculations times are similar to with normal ecoinvent (a few seconds). With a cutoff of 0.99, the size increases 
+calculations times are similar to ones with normal ecoinvent (a few seconds). With a cutoff of 0.99, the size of the
+regioinvent database increases 
 dramatically, and so does the calculation time (from 5 to 15 minutes depending on your machine). <br>
 There are currently no support for other LCA software, as SimaPro and openLCA are not able to support the size of the
 regioinvent database.
 
 ## Overview of the methodology
+
+For a deep dive in the methodology of regioinvent, take a look at the Methodology.md file.
 
 <img src="images/brief_methodo.png" width="600"/>
 
@@ -100,11 +103,17 @@ regioinvent database.
 3. The national consumption markets are connected to the rest of the database
 4. Elementary flows are spatialized
 
-For the detailed methodology, take a look at the Methodology.md file.
-
 ## Adaptations
 - ```Regiopremise``` (https://github.com/matthieu-str/Regiopremise) is an adaptation of regioinvent that can work with the 
 ```premise``` library (https://github.com/polca/premise).
+
+## Future developments
+Next steps for regioinvent are to:
+- operate with the ecoinvent 3.11 version
+- adapt the transportation within the different markets to reflect the origins of commodities
+- link with the LC-impact LCIA methodology
+- derive and integrate uncertainty factors for consumption markets, based on the year-to-year trade variations
+- find and integrate more and more real production volumes instead of relying on rough estimates
 
 ## Support
 Contact [maxime.agez@polymtl.ca](mailto:maxime.agez@polymtl.ca)
