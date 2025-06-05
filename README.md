@@ -79,7 +79,7 @@ brightway2 (NOT brightway2.5).
 You can then follow the steps presented in the [demo.ipynb](https://github.com/CIRAIG/Regioinvent/tree/master/doc/demo.ipynb) 
 Jupyter notebook.
 
-Required python version: 3.11
+Recommended python version: 3.11.8
 
 ## How to use after running the code?
 Once the regionalized version of ecoinvent is created on Python, it will automatically be exported to your brightway2
