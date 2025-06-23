@@ -1374,11 +1374,13 @@ class Regioinvent:
         # identify electricity related exchanges
         electricity_product_names = list(set([i['product'] for i in process['exchanges'] if
                                              'electricity' in i['name'] and 'aluminium' not in i['name'] and
-                                              'cobalt' not in i['name'] and 'voltage' in i['name']]))
+                                              'cobalt' not in i['name'] and 'voltage' in i['name'] and
+                                              'network' not in i['name']]))
         # loop through the identified process
         for electricity_product_name in electricity_product_names:
             unit_name = list(set([i['unit'] for i in process['exchanges'] if 'electricity' in i['name'] and
-                                  'aluminium' not in i['name'] and 'cobalt' not in i['name'] and 'voltage' in i['name']]))
+                                  'aluminium' not in i['name'] and 'cobalt' not in i['name'] and
+                                  'voltage' in i['name'] and 'network' not in i['name']]))
             # if somehow different units used for electricity flows -> problem
             assert len(unit_name) == 1
             unit_name = unit_name[0]
@@ -1388,7 +1390,7 @@ class Regioinvent:
             # remove electricity flows from non-appropriated geography
             for exc in process['exchanges'][:]:
                 if (electricity_product_name == exc['product'] and 'aluminium' not in exc['name'] and
-                        'cobalt' not in exc['name'] and 'voltage' in exc['name']):
+                        'cobalt' not in exc['name'] and 'voltage' in exc['name'] and 'network' not in exc['name']):
                     process['exchanges'].remove(exc)
 
             electricity_region = None
