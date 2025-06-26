@@ -1082,7 +1082,8 @@ class Regioinvent:
                     process['reference product'] in self.eco_to_hs_class.keys()):
                 for exc in process['exchanges']:
                     if 'technology mix' in exc['name']:
-                        if (exc['name'], exc['product'], exc['location']) not in used_techno_mixes:
+                        if ((exc['name'], exc['product'], exc['location']) not in used_techno_mixes or
+                                exc['location'] == 'RoW'):
                             used_techno_mixes.append((exc['name'], exc['product'], exc['location']))
 
         reduced_regioinvent = []
