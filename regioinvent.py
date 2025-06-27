@@ -1085,7 +1085,7 @@ class Regioinvent:
                         if (exc['name'], exc['product'], exc['location']) not in used_techno_mixes:
                             used_techno_mixes.append((exc['name'], exc['product'], exc['location']))
             # we want to make sure we always have the RoW technology mix for a default option
-            if 'technology mix' in process['name'] and 'RoW' in process['location']:
+            if 'technology mix' in process['name'] and 'RoW' == process['location']:
                 if (process['name'], process['reference product'], process['location']) not in used_techno_mixes:
                     used_techno_mixes.append((process['name'], process['reference product'], process['location']))
 
