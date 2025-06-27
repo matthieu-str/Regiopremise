@@ -1082,9 +1082,12 @@ class Regioinvent:
                     process['reference product'] in self.eco_to_hs_class.keys()):
                 for exc in process['exchanges']:
                     if 'technology mix' in exc['name']:
-                        if ((exc['name'], exc['product'], exc['location']) not in used_techno_mixes or
-                                exc['location'] == 'RoW'):
+                        if (exc['name'], exc['product'], exc['location']) not in used_techno_mixes:
                             used_techno_mixes.append((exc['name'], exc['product'], exc['location']))
+            # we want to make sure we always have the RoW technology mix for a default option
+            if 'technology mix' in process['name'] and 'RoW' in process['location']:
+                if (process['name'], process['reference product'], process['location']) not in used_techno_mixes:
+                    used_techno_mixes.append((process['name'], process['reference product'], process['location']))
 
         reduced_regioinvent = []
         for ds in self.regioinvent_in_wurst:
