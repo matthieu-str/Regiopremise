@@ -19,10 +19,10 @@ import uuid
 
 import brightway2 as bw2
 import pandas as pd
-import pkg_resources
 import wurst
 import wurst.searching as ws
 from tqdm import tqdm
+from importlib.resources import files, as_file
 
 
 class Regioinvent:
@@ -76,126 +76,65 @@ class Regioinvent:
         self.name_spatialized_biosphere = "biosphere3_spatialized_flows"
 
         # load data from the different mapping files and such
-        with open(
-            pkg_resources.resource_filename(
-                __name__,
-                "/data/Regionalization/ei"
-                + self.ecoinvent_version
-                + "/ecoinvent_to_HS.json",
-            ),
-            "r",
-        ) as f:
-            self.eco_to_hs_class = json.load(f)
-        with open(
-            pkg_resources.resource_filename(
-                __name__,
-                "/data/Regionalization/ei"
-                + self.ecoinvent_version
-                + "/HS_to_exiobase_name.json",
-            ),
-            "r",
-        ) as f:
-            self.hs_class_to_exio = json.load(f)
-        with open(
-            pkg_resources.resource_filename(
-                __name__,
-                "/data/Regionalization/ei"
-                + self.ecoinvent_version
-                + "/country_to_ecoinvent_regions.json",
-            ),
-            "r",
-        ) as f:
-            self.country_to_ecoinvent_regions = json.load(f)
-        with open(
-            pkg_resources.resource_filename(
-                __name__,
-                "/data/Regionalization/ei"
-                + self.ecoinvent_version
-                + "/electricity_processes.json",
-            ),
-            "r",
-        ) as f:
-            self.electricity_geos = json.load(f)
-        with open(
-            pkg_resources.resource_filename(
-                __name__,
-                "/data/Regionalization/ei"
-                + self.ecoinvent_version
-                + "/electricity_aluminium_processes.json",
-            ),
-            "r",
-        ) as f:
-            self.electricity_aluminium_geos = json.load(f)
-        with open(
-            pkg_resources.resource_filename(
-                __name__,
-                "/data/Regionalization/ei"
-                + self.ecoinvent_version
-                + "/waste_processes.json",
-            ),
-            "r",
-        ) as f:
-            self.waste_geos = json.load(f)
-        with open(
-            pkg_resources.resource_filename(
-                __name__,
-                "/data/Regionalization/ei"
-                + self.ecoinvent_version
-                + "/heat_industrial_ng_processes.json",
-            ),
-            "r",
-        ) as f:
-            self.heat_district_ng = json.load(f)
-        with open(
-            pkg_resources.resource_filename(
-                __name__,
-                "/data/Regionalization/ei"
-                + self.ecoinvent_version
-                + "/heat_industrial_non_ng_processes.json",
-            ),
-            "r",
-        ) as f:
-            self.heat_district_non_ng = json.load(f)
-        with open(
-            pkg_resources.resource_filename(
-                __name__,
-                "/data/Regionalization/ei"
-                + self.ecoinvent_version
-                + "/heat_small_scale_non_ng_processes.json",
-            ),
-            "r",
-        ) as f:
-            self.heat_small_scale_non_ng = json.load(f)
-        with open(
-            pkg_resources.resource_filename(
-                __name__,
-                "/data/Regionalization/ei"
-                + self.ecoinvent_version
-                + "/COMTRADE_to_ecoinvent_geographies.json",
-            ),
-            "r",
-        ) as f:
-            self.convert_ecoinvent_geos = json.load(f)
-        with open(
-            pkg_resources.resource_filename(
-                __name__,
-                "/data/Regionalization/ei"
-                + self.ecoinvent_version
-                + "/COMTRADE_to_exiobase_geographies.json",
-            ),
-            "r",
-        ) as f:
-            self.convert_exiobase_geos = json.load(f)
-        with open(
-            pkg_resources.resource_filename(
-                __name__,
-                "/data/Regionalization/ei"
-                + self.ecoinvent_version
-                + "/no_inputs_processes.json",
-            ),
-            "r",
-        ) as f:
-            self.no_inputs_processes = json.load(f)
+        with as_file(files('regioinvent').joinpath(
+                f"data/Regionalization/ei{self.ecoinvent_version}/ecoinvent_to_HS.json")) as file_path:
+            with open(file_path, "r") as f:
+                self.eco_to_hs_class = json.load(f)
+
+        with as_file(files('regioinvent').joinpath(
+                f"data/Regionalization/ei{self.ecoinvent_version}/HS_to_exiobase_name.json")) as file_path:
+            with open(file_path, "r") as f:
+                self.hs_class_to_exio = json.load(f)
+
+        with as_file(files('regioinvent').joinpath(
+                f"data/Regionalization/ei{self.ecoinvent_version}/country_to_ecoinvent_regions.json")) as file_path:
+            with open(file_path, "r") as f:
+                self.country_to_ecoinvent_regions = json.load(f)
+
+        with as_file(files('regioinvent').joinpath(
+                f"data/Regionalization/ei{self.ecoinvent_version}/electricity_processes.json")) as file_path:
+            with open(file_path, "r") as f:
+                self.electricity_geos = json.load(f)
+
+        with as_file(files('regioinvent').joinpath(
+                f"data/Regionalization/ei{self.ecoinvent_version}/electricity_aluminium_processes.json")) as file_path:
+            with open(file_path, "r") as f:
+                self.electricity_aluminium_geos = json.load(f)
+
+        with as_file(files('regioinvent').joinpath(
+                f"data/Regionalization/ei{self.ecoinvent_version}/waste_processes.json")) as file_path:
+            with open(file_path, "r") as f:
+                self.waste_geos = json.load(f)
+
+        with as_file(files('regioinvent').joinpath(
+                f"data/Regionalization/ei{self.ecoinvent_version}/heat_industrial_ng_processes.json")) as file_path:
+            with open(file_path, "r") as f:
+                self.heat_district_ng = json.load(f)
+
+        with as_file(files('regioinvent').joinpath(
+                f"data/Regionalization/ei{self.ecoinvent_version}/heat_industrial_non_ng_processes.json")) as file_path:
+            with open(file_path, "r") as f:
+                self.heat_district_non_ng = json.load(f)
+
+        with as_file(files('regioinvent').joinpath(
+                f"data/Regionalization/ei{self.ecoinvent_version}/heat_small_scale_non_ng_processes.json")) as file_path:
+            with open(file_path, "r") as f:
+                self.heat_small_scale_non_ng = json.load(f)
+
+        with as_file(files('regioinvent').joinpath(
+                f"data/Regionalization/ei{self.ecoinvent_version}/COMTRADE_to_ecoinvent_geographies.json")) as file_path:
+            with open(file_path, "r") as f:
+                self.convert_ecoinvent_geos = json.load(f)
+
+        with as_file(files('regioinvent').joinpath(
+                f"data/Regionalization/ei{self.ecoinvent_version}/COMTRADE_to_exiobase_geographies.json")) as file_path:
+            with open(file_path, "r") as f:
+                self.convert_exiobase_geos = json.load(f)
+
+        with as_file(files('regioinvent').joinpath(
+                f"data/Regionalization/ei{self.ecoinvent_version}/no_inputs_processes.json")) as file_path:
+            with open(file_path, "r") as f:
+                self.no_inputs_processes = json.load(f)
 
         # initialize attributes used within package
         self.assigned_random_geography = []
@@ -229,16 +168,11 @@ class Regioinvent:
         if "biosphere3_spatialized_flows" not in bw2.databases:
             self.logger.info("Creating spatialized biosphere flows...")
             # load the correct pickle file with the different spatialized elementary flows metadata
-            with open(
-                pkg_resources.resource_filename(
-                    __name__,
-                    "/data/Spatialization_of_elementary_flows/ei"
-                    + self.ecoinvent_version
-                    + "/spatialized_biosphere_database.pickle",
-                ),
-                "rb",
-            ) as f:
-                spatialized_biosphere = pickle.load(f)
+            with as_file(files('regioinvent').joinpath(
+                    f"data/Spatialization_of_elementary_flows/ei{self.ecoinvent_version}/spatialized_biosphere_database.pickle")) as file_path:
+                with open(file_path, "rb") as f:
+                    spatialized_biosphere = pickle.load(f)
+
             # create the new biosphere3 database with spatialized elementary flows
             bw2.Database(self.name_spatialized_biosphere).write(spatialized_biosphere)
         else:
@@ -262,16 +196,10 @@ class Regioinvent:
             }
 
             # load the list of the base name of all spatialized elementary flows
-            with open(
-                pkg_resources.resource_filename(
-                    __name__,
-                    "/data/Spatialization_of_elementary_flows/ei"
-                    + self.ecoinvent_version
-                    + "/spatialized_elementary_flows.json",
-                ),
-                "r",
-            ) as f:
-                base_spatialized_flows = json.load(f)
+            with as_file(files('regioinvent').joinpath(
+                    f"data/Spatialization_of_elementary_flows/ei{self.ecoinvent_version}/spatialized_elementary_flows.json")) as file_path:
+                with open(file_path, "r") as f:
+                    base_spatialized_flows = json.load(f)
 
             # store the codes of the spatialized flows in a dictionary
             spatialized_flows = {
@@ -383,88 +311,82 @@ class Regioinvent:
             self.logger.info(
                 "Importing all available fully regionalized lcia methods for ecoinvent3.10."
             )
-            bw2.BW2Package.import_file(
-                pkg_resources.resource_filename(
-                    __name__,
-                    "/data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v310.0fffd5e3daa5f4cf11ef83e49c375827.bw2package",
-                )
-            )
-            bw2.BW2Package.import_file(
-                pkg_resources.resource_filename(
-                    __name__,
-                    "/data/EF/EF31_regionalized-for-ecoinvent-v310.87ec66ed7e5775d0132d1129fb5caf03.bw2package",
-                )
-            )
-            bw2.BW2Package.import_file(
-                pkg_resources.resource_filename(
-                    __name__,
-                    "/data/ReCiPe/ReCiPe_regionalized-for-ecoinvent-v310.dd7e66b1994d898394e3acfbed8eef83.bw2package",
-                )
-            )
+
+            with as_file(files('regioinvent').joinpath(
+                    "data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v310.0fffd5e3daa5f4cf11ef83e49c375827_bw2package")
+            ) as file_path:
+                bw2.BW2Package.import_file(file_path)
+
+            with as_file(files('regioinvent').joinpath(
+                    "/data/EF/EF31_regionalized-for-ecoinvent-v310.87ec66ed7e5775d0132d1129fb5caf03.bw2package")
+            ) as file_path:
+                bw2.BW2Package.import_file(file_path)
+
+            with as_file(files('regioinvent').joinpath(
+                    "/data/ReCiPe/ReCiPe_regionalized-for-ecoinvent-v310.dd7e66b1994d898394e3acfbed8eef83.bw2package")
+            ) as file_path:
+                bw2.BW2Package.import_file(file_path)
+
         if lcia_method == "all" and self.ecoinvent_version == "3.9":
             self.logger.info(
                 "Importing all available fully regionalized lcia methods for ecoinvent3.9."
             )
-            bw2.BW2Package.import_file(
-                pkg_resources.resource_filename(
-                    __name__,
-                    "/data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v39.af770e84bfd0f4365d509c026796639a.bw2package",
-                )
-            )
-            bw2.BW2Package.import_file(
-                pkg_resources.resource_filename(
-                    __name__,
-                    "/data/EF/EF31_regionalized-for-ecoinvent-v39.ff0965b0f9793fbd2a351c9155946122.bw2package",
-                )
-            )
-            bw2.BW2Package.import_file(
-                pkg_resources.resource_filename(
-                    __name__,
-                    "/data/ReCiPe/ReCiPe_regionalized-for-ecoinvent-v39.d03db1f1699b4f0b4d72626e52a40647.bw2package",
-                )
-            )
+
+            with as_file(files('regioinvent').joinpath(
+                    "/data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v39.af770e84bfd0f4365d509c026796639a.bw2package")
+            ) as file_path:
+                bw2.BW2Package.import_file(file_path)
+
+            with as_file(files('regioinvent').joinpath(
+                    "/data/EF/EF31_regionalized-for-ecoinvent-v39.ff0965b0f9793fbd2a351c9155946122.bw2package")
+            ) as file_path:
+                bw2.BW2Package.import_file(file_path)
+
+            with as_file(files('regioinvent').joinpath(
+                    "/data/ReCiPe/ReCiPe_regionalized-for-ecoinvent-v39.d03db1f1699b4f0b4d72626e52a40647.bw2package")
+            ) as file_path:
+                bw2.BW2Package.import_file(file_path)
+
 
         if lcia_method == "IW v2.1" and self.ecoinvent_version == "3.10":
             self.logger.info(
                 "Importing the fully regionalized version of IMPACT World+ v2.1 for ecoinvent3.10."
             )
-            bw2.BW2Package.import_file(
-                pkg_resources.resource_filename(
-                    __name__,
-                    "/data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v310.0fffd5e3daa5f4cf11ef83e49c375827.bw2package",
-                )
-            )
+
+            with as_file(files('regioinvent').joinpath(
+                    "/data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v310.0fffd5e3daa5f4cf11ef83e49c375827.bw2package")
+            ) as file_path:
+                bw2.BW2Package.import_file(file_path)
+
         elif lcia_method == "IW v2.1" and self.ecoinvent_version == "3.9":
             self.logger.info(
                 "Importing the fully regionalized version of IMPACT World+ v2.1 for ecoinvent3.9."
             )
-            bw2.BW2Package.import_file(
-                pkg_resources.resource_filename(
-                    __name__,
-                    "/data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v39.af770e84bfd0f4365d509c026796639a.bw2package",
-                )
-            )
+
+            with as_file(files('regioinvent').joinpath(
+                    "/data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v39.af770e84bfd0f4365d509c026796639a.bw2package")
+            ) as file_path:
+                bw2.BW2Package.import_file(file_path)
 
         elif lcia_method == "EF v3.1" and self.ecoinvent_version == "3.10":
             self.logger.info(
                 "Importing the fully regionalized version of EF v3.1 for ecoinvent 3.10."
             )
-            bw2.BW2Package.import_file(
-                pkg_resources.resource_filename(
-                    __name__,
-                    "/data/EF/EF31_regionalized-for-ecoinvent-v310.87ec66ed7e5775d0132d1129fb5caf03.bw2package",
-                )
-            )
+
+            with as_file(files('regioinvent').joinpath(
+                    "/data/EF/EF31_regionalized-for-ecoinvent-v310.87ec66ed7e5775d0132d1129fb5caf03.bw2package")
+            ) as file_path:
+                bw2.BW2Package.import_file(file_path)
+
         elif lcia_method == "EF v3.1" and self.ecoinvent_version == "3.9":
             self.logger.info(
                 "Importing the fully regionalized version of EF v3.1 for ecoinvent 3.9."
             )
-            bw2.BW2Package.import_file(
-                pkg_resources.resource_filename(
-                    __name__,
-                    "/data/EF/EF31_regionalized-for-ecoinvent-v39.ff0965b0f9793fbd2a351c9155946122.bw2package",
-                )
-            )
+
+            with as_file(files('regioinvent').joinpath(
+                    "/data/EF/EF31_regionalized-for-ecoinvent-v39.ff0965b0f9793fbd2a351c9155946122.bw2package")
+            ) as file_path:
+                bw2.BW2Package.import_file(file_path)
 
         elif (
             lcia_method == "ReCiPe 2016 v1.03 (H)" and self.ecoinvent_version == "3.10"
@@ -472,22 +394,21 @@ class Regioinvent:
             self.logger.info(
                 "Importing the fully regionalized version of ReCiPe 2016 v1.03 (H) for ecoinvent 3.10."
             )
-            bw2.BW2Package.import_file(
-                pkg_resources.resource_filename(
-                    __name__,
-                    "/data/ReCiPe/ReCiPe_regionalized-for-ecoinvent-v310.dd7e66b1994d898394e3acfbed8eef83.bw2package",
-                )
-            )
+
+            with as_file(files('regioinvent').joinpath(
+                    "/data/ReCiPe/ReCiPe_regionalized-for-ecoinvent-v310.dd7e66b1994d898394e3acfbed8eef83.bw2package")
+            ) as file_path:
+                bw2.BW2Package.import_file(file_path)
+
         elif lcia_method == "ReCiPe 2016 v1.03 (H)" and self.ecoinvent_version == "3.9":
             self.logger.info(
                 "Importing the fully regionalized version of ReCiPe 2016 v1.03 (H) for ecoinvent 3.9."
             )
-            bw2.BW2Package.import_file(
-                pkg_resources.resource_filename(
-                    __name__,
-                    "/data/ReCiPe/ReCiPe_regionalized-for-ecoinvent-v39.d03db1f1699b4f0b4d72626e52a40647.bw2package",
-                )
-            )
+
+            with as_file(files('regioinvent').joinpath(
+                    "/data/ReCiPe/ReCiPe_regionalized-for-ecoinvent-v39.d03db1f1699b4f0b4d72626e52a40647.bw2package")
+            ) as file_path:
+                bw2.BW2Package.import_file(file_path)
 
     def regionalize_ecoinvent_with_trade(
         self, trade_database_path, regioinvent_database_name, cutoff
@@ -988,28 +909,16 @@ class Regioinvent:
 
         # -----------------------------------------------------------------------------------------------------------
         # in a second time, we regionalize the most relevant other products, see doc/ to see how we selected those
-        with open(
-            pkg_resources.resource_filename(
-                __name__,
-                "/data/Regionalization/ei"
-                + self.ecoinvent_version
-                + "/relevant_non_traded_products.json",
-            ),
-            "r",
-        ) as f:
-            relevant_non_traded_products = json.load(f)
+        with as_file(files('regioinvent').joinpath(
+                f"data/Regionalization/ei{self.ecoinvent_version}/relevant_non_traded_products.json")) as file_path:
+            with open(file_path, "r") as f:
+                relevant_non_traded_products = json.load(f)
 
         # get all the geographies of regioinvent
-        with open(
-            pkg_resources.resource_filename(
-                __name__,
-                "/data/Spatialization_of_elementary_flows/ei"
-                + self.ecoinvent_version
-                + "/geographies_of_regioinvent.json",
-            ),
-            "r",
-        ) as f:
-            geographies_needed = json.load(f)
+        with as_file(files('regioinvent').joinpath(
+                f"data/Spatialization_of_elementary_flows/ei{self.ecoinvent_version}/geographies_of_regioinvent.json")) as file_path:
+            with open(file_path, "r") as f:
+                geographies_needed = json.load(f)
 
         self.logger.info(
             "Regionalizing main inputs of non-internationally traded processes of ecoinvent..."
@@ -1862,16 +1771,11 @@ class Regioinvent:
         )
 
         # the list of all spatialized flows
-        with open(
-            pkg_resources.resource_filename(
-                __name__,
-                "/data/Spatialization_of_elementary_flows/ei"
-                + self.ecoinvent_version
-                + "/spatialized_elementary_flows.json",
-            ),
-            "r",
-        ) as file:
-            spatialized_elem_flows = json.load(file)
+        with as_file(files('regioinvent').joinpath(
+                f"data/Spatialization_of_elementary_flows/ei{self.ecoinvent_version}/spatialized_elementary_flows.json")) as file_path:
+            with open(file_path, "r") as f:
+                spatialized_elem_flows = json.load(f)
+
         # a dictionary with all the associated uuids of the spatialized flows
         regionalized_flows = {
             (i.as_dict()["name"], i.as_dict()["categories"]): i.as_dict()["code"]
