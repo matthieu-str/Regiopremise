@@ -313,17 +313,17 @@ class Regioinvent:
             )
 
             with as_file(files('regioinvent').joinpath(
-                    "data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v310.0fffd5e3daa5f4cf11ef83e49c375827_bw2package")
+                    "data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v310.0fffd5e3daa5f4cf11ef83e49c375827.bw2package")
             ) as file_path:
                 bw2.BW2Package.import_file(file_path)
 
             with as_file(files('regioinvent').joinpath(
-                    "/data/EF/EF31_regionalized-for-ecoinvent-v310.87ec66ed7e5775d0132d1129fb5caf03.bw2package")
+                    "data/EF/EF31_regionalized-for-ecoinvent-v310.87ec66ed7e5775d0132d1129fb5caf03.bw2package")
             ) as file_path:
                 bw2.BW2Package.import_file(file_path)
 
             with as_file(files('regioinvent').joinpath(
-                    "/data/ReCiPe/ReCiPe_regionalized-for-ecoinvent-v310.dd7e66b1994d898394e3acfbed8eef83.bw2package")
+                    "data/ReCiPe/ReCiPe_regionalized-for-ecoinvent-v310.dd7e66b1994d898394e3acfbed8eef83.bw2package")
             ) as file_path:
                 bw2.BW2Package.import_file(file_path)
 
@@ -333,20 +333,19 @@ class Regioinvent:
             )
 
             with as_file(files('regioinvent').joinpath(
-                    "/data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v39.af770e84bfd0f4365d509c026796639a.bw2package")
+                    "data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v39.af770e84bfd0f4365d509c026796639a.bw2package")
             ) as file_path:
                 bw2.BW2Package.import_file(file_path)
 
             with as_file(files('regioinvent').joinpath(
-                    "/data/EF/EF31_regionalized-for-ecoinvent-v39.ff0965b0f9793fbd2a351c9155946122.bw2package")
+                    "data/EF/EF31_regionalized-for-ecoinvent-v39.ff0965b0f9793fbd2a351c9155946122.bw2package")
             ) as file_path:
                 bw2.BW2Package.import_file(file_path)
 
             with as_file(files('regioinvent').joinpath(
-                    "/data/ReCiPe/ReCiPe_regionalized-for-ecoinvent-v39.d03db1f1699b4f0b4d72626e52a40647.bw2package")
+                    "data/ReCiPe/ReCiPe_regionalized-for-ecoinvent-v39.d03db1f1699b4f0b4d72626e52a40647.bw2package")
             ) as file_path:
                 bw2.BW2Package.import_file(file_path)
-
 
         if lcia_method == "IW v2.1" and self.ecoinvent_version == "3.10":
             self.logger.info(
@@ -354,7 +353,7 @@ class Regioinvent:
             )
 
             with as_file(files('regioinvent').joinpath(
-                    "/data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v310.0fffd5e3daa5f4cf11ef83e49c375827.bw2package")
+                    "data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v310.0fffd5e3daa5f4cf11ef83e49c375827.bw2package")
             ) as file_path:
                 bw2.BW2Package.import_file(file_path)
 
@@ -364,7 +363,7 @@ class Regioinvent:
             )
 
             with as_file(files('regioinvent').joinpath(
-                    "/data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v39.af770e84bfd0f4365d509c026796639a.bw2package")
+                    "data/IW/impact_world_plus_21_regionalized-for-ecoinvent-v39.af770e84bfd0f4365d509c026796639a.bw2package")
             ) as file_path:
                 bw2.BW2Package.import_file(file_path)
 
@@ -374,7 +373,7 @@ class Regioinvent:
             )
 
             with as_file(files('regioinvent').joinpath(
-                    "/data/EF/EF31_regionalized-for-ecoinvent-v310.87ec66ed7e5775d0132d1129fb5caf03.bw2package")
+                    "data/EF/EF31_regionalized-for-ecoinvent-v310.87ec66ed7e5775d0132d1129fb5caf03.bw2package")
             ) as file_path:
                 bw2.BW2Package.import_file(file_path)
 
@@ -384,7 +383,7 @@ class Regioinvent:
             )
 
             with as_file(files('regioinvent').joinpath(
-                    "/data/EF/EF31_regionalized-for-ecoinvent-v39.ff0965b0f9793fbd2a351c9155946122.bw2package")
+                    "data/EF/EF31_regionalized-for-ecoinvent-v39.ff0965b0f9793fbd2a351c9155946122.bw2package")
             ) as file_path:
                 bw2.BW2Package.import_file(file_path)
 
@@ -396,7 +395,7 @@ class Regioinvent:
             )
 
             with as_file(files('regioinvent').joinpath(
-                    "/data/ReCiPe/ReCiPe_regionalized-for-ecoinvent-v310.dd7e66b1994d898394e3acfbed8eef83.bw2package")
+                    "data/ReCiPe/ReCiPe_regionalized-for-ecoinvent-v310.dd7e66b1994d898394e3acfbed8eef83.bw2package")
             ) as file_path:
                 bw2.BW2Package.import_file(file_path)
 
@@ -406,7 +405,7 @@ class Regioinvent:
             )
 
             with as_file(files('regioinvent').joinpath(
-                    "/data/ReCiPe/ReCiPe_regionalized-for-ecoinvent-v39.d03db1f1699b4f0b4d72626e52a40647.bw2package")
+                    "data/ReCiPe/ReCiPe_regionalized-for-ecoinvent-v39.d03db1f1699b4f0b4d72626e52a40647.bw2package")
             ) as file_path:
                 bw2.BW2Package.import_file(file_path)
 
