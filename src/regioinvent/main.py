@@ -235,6 +235,12 @@ class Regiopremise:
             self.logger.info("Spatializing premise...")
             # loop through the whole ecoinvent database
             for process in self.ei_wurst:
+                # check if the location is a premise-specific location
+                if process["location"] in self.premise_geo_mapping:
+                    location = self.premise_geo_mapping[process["location"]]
+                else:
+                    location = process["location"]
+
                 # if you have more than 1000 exchanges -> aggregated process (S) -> should not be spatialized
                 if len(process["exchanges"]) < 1000:
                     # create a copy, but in the new ecoinvent database
@@ -253,7 +259,7 @@ class Regiopremise:
                                     # to spatialize it, we need to get the uuid of the existing spatialized flow
                                     exc["code"] = spatialized_flows[
                                         (
-                                            exc["name"] + ", " + process["location"],
+                                            exc["name"] + ", " + location,
                                             exc["categories"],
                                         )
                                     ]
@@ -261,7 +267,7 @@ class Regiopremise:
                                     exc["database"] = self.name_spatialized_biosphere
                                     # update its name
                                     exc["name"] = (
-                                        exc["name"] + ", " + process["location"]
+                                        exc["name"] + ", " + location
                                     )
                                     # and finally its input key
                                     exc["input"] = (exc["database"], exc["code"])
@@ -966,7 +972,7 @@ class Regiopremise:
                 geographies_needed = json.load(f)
 
         self.logger.info(
-            "Regionalizing main inputs of non-internationally traded processes of ecoinvent..."
+            "Regionalizing main inputs of non-internationally traded processes of premise..."
         )
         for product in tqdm(relevant_non_traded_products, leave=True):
             filter_processes = ws.get_many(
