@@ -1,5 +1,4 @@
-brightway2==2.4.6
-numpy==1.23.5
+brightway2==2.4.4
 pandas==2.1.4
-tqdm
+numpy==1.23.5
 wurst>=0.4
