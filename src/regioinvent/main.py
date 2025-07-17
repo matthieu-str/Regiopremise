@@ -322,13 +322,15 @@ class Regiopremise:
                 "spatialization, please delete it and re-run."
             )
 
-    def import_fully_regionalized_impact_method(self, lcia_method="all"):
+    def import_fully_regionalized_impact_method(self, lcia_method="all", biosphere_database_name="biosphere3"):
         """
         Function to import a fully regionalized impact method into your brightway project, to-be-used with the
         spatialized version of premise. You can choose between IMPACT World+, EF and ReCiPe, or simply all of them.
 
         :param lcia_method: [str] the name of the LCIA method to be imported to be used with the spatialized premise,
                                 available methods are "IW v2.1", "EF v3.1", "ReCiPe 2016 v1.03 (H)" or "all".
+        :param biosphere_database_name: [str] name of the original biosphere database (not spatialized in the
+                                brightway project)
         :return:
         """
 
@@ -439,6 +441,56 @@ class Regiopremise:
                     "data/ReCiPe/ReCiPe_regionalized-for-ecoinvent-v39.d03db1f1699b4f0b4d72626e52a40647.bw2package")
             ) as file_path:
                 bw2.BW2Package.import_file(file_path)
+
+        if biosphere_database_name != "biosphere3":
+            self._correct_biosphere_database_name(biosphere_database_name, lcia_method)
+
+    def _correct_biosphere_database_name(self, biosphere_database_name, lcia_method):
+
+        if lcia_method == "IW v2.1":
+            methods = [
+                f'IMPACT World+ Damage 2.1_regionalized for ecoinvent v{self.ecoinvent_version}',
+                f'IMPACT World+ Midpoint 2.1_regionalized for ecoinvent v{self.ecoinvent_version}',
+            ]
+
+        elif lcia_method == "EF v3.1":
+            methods = [
+                'EF v3.1 regionalized',
+            ]
+
+        elif lcia_method == "ReCiPe 2016 v1.03 (H)":
+            methods = [
+                'ReCiPe 2016 v1.03, midpoint (H) regionalized',
+                'ReCiPe 2016 v1.03, endpoint (H) regionalized',
+            ]
+
+        elif lcia_method == "all":
+            methods = [
+                f'IMPACT World+ Damage 2.1_regionalized for ecoinvent v{self.ecoinvent_version}',
+                f'IMPACT World+ Midpoint 2.1_regionalized for ecoinvent v{self.ecoinvent_version}',
+                'EF v3.1 regionalized',
+                'ReCiPe 2016 v1.03, midpoint (H) regionalized',
+                'ReCiPe 2016 v1.03, endpoint (H) regionalized',
+            ]
+
+        else:
+            raise KeyError(
+                "Available LCIA methods are: 'IW v2.1', 'EF v3.1', 'ReCiPe 2016 v1.03 (H)' or 'all'"
+            )
+
+        methods = [i for i in bw2.methods if i[0] in methods]
+
+        for method in methods:
+            method = bw2.Method(method)
+            cf_list = method.load()
+            new_cf_list = []
+            for cf in cf_list:
+                if cf[0][0] == 'biosphere3':
+                    new_cf = ((biosphere_database_name, cf[0][1]), cf[1])  # replace 'biosphere3'
+                    new_cf_list.append(new_cf)
+                else:
+                    new_cf_list.append(cf)
+            method.write(new_cf_list)  # overwrite the existing method
 
     def regionalize_premise_with_trade(
         self, trade_database_path, regioinvent_database_name, cutoff
